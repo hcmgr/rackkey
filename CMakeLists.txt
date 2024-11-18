@@ -1,19 +1,17 @@
 cmake_minimum_required(VERSION 3.9)
 project(rackkey)
 
-# Add compile options
+# Set C++ standard
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Find required package
-find_package(cpprestsdk REQUIRED PATHS)
+# Find cpprestsdk package
+find_package(cpprestsdk REQUIRED PATHS "/usr/lib/x86_64-linux-gnu/cmake/cpprestsdk")
 
-# Add executable
-add_executable(rackkey main.cpp)
+# Add executables
+add_executable(master master.cpp)
 
-# Link libraries
-target_link_libraries(rackkey PRIVATE 
+target_link_libraries(master PRIVATE 
     cpprestsdk::cpprest
     crypto
-    # ssl
 )

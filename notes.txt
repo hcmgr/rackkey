@@ -1,0 +1,89 @@
+---------------------------------------
+PLAN / TODO
+---------------------------------------
+- Master request shells
+- consistent hashing implementation
+
+
+
+
+---------------------------------------
+IMPLEMENTATION DETAILS
+---------------------------------------
+
+Master
+------
+- exposes GET/PUT/DELETE API
+- breaks files into blocks and distributes across cluster of storage nodes
+- uses consistent hashing to distribute blocks evenly
+- stores KEY -> {blockNum -> nodeNum} mapping
+    - call this the KeyBlockNode map, or the KBN
+API (client -> master):
+    PUT:
+        - receives (KEY, payload)
+        - create entry in the KBN
+        - breaks up payload into {block1, block2, ...}
+        - for each block:
+            - use consistent hashing (key+blockNum) to determine 
+            which node stored on
+            - send PUT to relevant node with (KEY, blockNum, blockPayload)
+            - on success, add (blockNum->nodeNum) entry to KBN
+
+    GET:
+        - receives (KEY) to GET
+        - lookup KEY entry in KBN
+        - for each block:
+            - send GET to relevant node with (KEY, blockNum)
+            - add (in order) to a buffer
+        - package up buffer into response payload
+
+    DELETE:
+        - receives (KEY) to DELETE
+        - lookup KEY entry in KBN
+        - for each block:
+            - send DELETE to relevant node with (KEY, blockNum)
+
+Other responsibilities:
+    Adding/removing nodes
+        - options:
+            - manually (i.e. config file of ip:port addresses)
+            - dynamically:
+                - expose an API to add / remove nodes
+                - only let authorised users make these calls
+    
+    Checking health of nodes:
+        - heartbeat method
+        - send GET req to specialised heartbeat addr
+
+Stores:
+    - consistent hashing data structure (hash ring) 
+    - KBN map (KEY -> {blockNum -> nodeNum})
+
+Cluster
+-------
+- each cluster node just treated as a bucket of free/occupied blocks
+- on disk format:
+    Header:
+        Magic Number - 4 bytes
+        BAT offset - 4 bytes
+        Block size - 4 bytes
+    BAT:
+        TBD
+    Block 0
+    Block 1
+    ...
+    Block N
+API (master -> cluster node)
+GET:
+    - receives (KEY, blockNum)
+    - looks up offset in BAT
+    - returns block
+
+PUT:
+    - receives (KEY, blockNum, blockPayLoad)
+    - inserts new BAT entry: (KEY, blockNum) -> offset
+    - writes block at offset
+
+DELETE:
+    - receives (KEY, blockNum)
+    - removes BAT entry
