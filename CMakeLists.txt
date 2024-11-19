@@ -6,12 +6,15 @@ set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Find cpprestsdk package
-find_package(cpprestsdk REQUIRED PATHS "/usr/lib/x86_64-linux-gnu/cmake/cpprestsdk")
+find_package(cpprestsdk REQUIRED)
+find_package(OpenSSL REQUIRED)  # Note the capital letters
 
 # Add executables
-add_executable(master master.cpp)
+add_executable(master master.cpp utils.cpp)
+add_executable(hash_ring hash_ring.cpp)
 
+# Link cpprestsdk and OpenSSL libraries
 target_link_libraries(master PRIVATE 
     cpprestsdk::cpprest
-    crypto
+    OpenSSL::Crypto   # Correct target name
 )

@@ -4,6 +4,22 @@ PLAN / TODO
 - Master request shells
 - consistent hashing implementation
 
+---------------------------------------
+SCRIBBLES
+---------------------------------------
+MasterServer.route()
+    if "/store":
+        call StorageHandler.route()
+        StoreHandler:
+            GetHandler    
+            PostHandler
+            DeleteHandler
+
+MasterServer:
+    stores:
+        - consistent hashing data structure
+            - need for PUT, addNode and deleteNode 
+        - KBN map
 
 
 
@@ -16,9 +32,21 @@ Master
 - exposes GET/PUT/DELETE API
 - breaks files into blocks and distributes across cluster of storage nodes
 - uses consistent hashing to distribute blocks evenly
-- stores KEY -> {blockNum -> nodeNum} mapping
+
+KBN:
+    - master stores KEY -> {blockNum -> nodeNum} mapping
     - call this the KeyBlockNode map, or the KBN
+
+HashRing:
+    - nodes evenly distributed around ring of (2^32 - 1) values
+    - when used:
+        - when add block (PUT):
+            - use hash(key + blockNum) to determine place on ring and thus,
+              what node to store on
+        - when delete a node, use ring to de-assign blocks of deleted node
+
 API (client -> master):
+    - endpoint: /store/{KEY}
     PUT:
         - receives (KEY, payload)
         - create entry in the KBN
@@ -50,14 +78,17 @@ Other responsibilities:
             - dynamically:
                 - expose an API to add / remove nodes
                 - only let authorised users make these calls
+
+        - Adding:
+
+        - Removing:
+            - when remove a node, must re-assign all its blocks
+              as per the consistent hashing strategy
+    
     
     Checking health of nodes:
         - heartbeat method
         - send GET req to specialised heartbeat addr
-
-Stores:
-    - consistent hashing data structure (hash ring) 
-    - KBN map (KEY -> {blockNum -> nodeNum})
 
 Cluster
 -------
@@ -74,16 +105,20 @@ Cluster
     ...
     Block N
 API (master -> cluster node)
-GET:
-    - receives (KEY, blockNum)
-    - looks up offset in BAT
-    - returns block
+    GET:
+        - receives (KEY, blockNum)
+        - looks up offset in BAT
+        - returns block
 
-PUT:
-    - receives (KEY, blockNum, blockPayLoad)
-    - inserts new BAT entry: (KEY, blockNum) -> offset
-    - writes block at offset
+    PUT:
+        - receives (KEY, blockNum, blockPayLoad)
+        - inserts new BAT entry: (KEY, blockNum) -> offset
+        - writes block at offset
 
-DELETE:
-    - receives (KEY, blockNum)
-    - removes BAT entry
+    DELETE:
+        - receives (KEY, blockNum)
+        - removes BAT entry
+
+Other responsibilities:
+    - on delete of node, 
+

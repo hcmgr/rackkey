@@ -26,8 +26,6 @@ void getKeyFromRequestPath(http_request request) {
  */
 void example_handle_get_file(http_request request) {
     std::cout << "received req" << std::endl;
-    // getKeyFromRequestPath(request);
-
     const std::string filePath = "../example_files/archive.zip";
 
     // Open the file in binary mode
@@ -61,11 +59,12 @@ void example_handle_get_file(http_request request) {
 
 
 int main() {
-    uri_builder uri(U("http://localhost:8080"));
+    uri_builder uri(U("http://localhost:8082"));
     auto addr = uri.to_uri().to_string();
     http_listener listener(addr);
 
     listener.support(methods::GET, example_handle_get_file);
+    std::cout << status_codes::OK << std::endl;
 
     try {
         listener
