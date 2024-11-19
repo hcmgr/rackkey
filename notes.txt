@@ -46,6 +46,10 @@ HashRing:
             - use hash(key + blockNum) to determine place on ring and thus,
               what node to store on
         - when delete a node, use ring to de-assign blocks of deleted node
+    - use virtual nodes to ensure even distribution in 'low-node' environment
+        - each physical node has N virtual nodes
+        - blocks are assigned to a virtual node, which implictly assigns
+          it to a physical node
 
 API (client -> master):
     - endpoint: /store/{KEY}

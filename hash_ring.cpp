@@ -41,7 +41,8 @@ public:
     
     uint32_t hash() 
     {
-        return hashObject(this->name + std::to_string(this->id));
+        // return hashObject(this->name + std::to_string(this->id));
+        return Crypto::sha256_32(this->name + std::to_string(this->id));
     }
 
     std::string toString() 
@@ -73,6 +74,9 @@ public:
 
     }
 
+    /**
+     * Add given node to hash ring using RingNode hash function.
+     */
     void addNode(std::shared_ptr<RingNode> ringNode) 
     {
         uint32_t hash = ringNode->hash() % HASH_MODULO;
@@ -80,6 +84,19 @@ public:
         // TODO: re-assign all nodes between node and node-1 from node+1 to node
 
         // add node to ring
+        this->ring[hash] = ringNode;
+        return;
+    }
+
+
+    /**
+     * Add given node to hash ring using given hash.
+     */
+    void addNode(std::shared_ptr<RingNode> ringNode, uint32_t hash) 
+    {
+
+        // TODO: re-assign all nodes between node and node-1 from node+1 to node
+
         this->ring[hash] = ringNode;
         return;
     }
@@ -93,7 +110,8 @@ public:
         return;
     }
 
-    std::shared_ptr<RingNode> getNode(uint32_t hash) {
+    std::shared_ptr<RingNode> getNode(uint32_t hash) 
+    {
         return this->ring[hash];
     }
 
@@ -122,19 +140,9 @@ public:
     }
 };
 
-// TESTING //
-void testHashRingAddInitialNodes() 
-{
-    // initialise
-    HashRing hr = HashRing();
-    for (int i = 0; i < 10; i++) {
-        std::shared_ptr<RingNode> rn = std::make_shared<RingNode>("Node");
-        hr.addNode(rn);
-    }
-
-    // print the ring
-    hr.prettyPrintHashRing();
-}
+////////////////////////////////////////
+/////////////// TESTING ////////////////
+////////////////////////////////////////
 
 void testHashRingFindNextNode() {
     // initialise ring
@@ -151,7 +159,8 @@ void testHashRingFindNextNode() {
     std::string key = "archive.zip0";
     for (int i = 0; i < 10; i++) {
         std::string keyBlockCombo = key + std::to_string(i);
-        uint32_t hashDigest = hashObject(keyBlockCombo);
+        // uint32_t hashDigest = hashObject(keyBlockCombo);
+        uint32_t hashDigest = Crypto::sha256_32(keyBlockCombo);
         std::cout << keyBlockCombo << " : " << hashDigest << std::endl;
 
         uint32_t nextHash = hr.findNextNode(hashDigest);
@@ -162,37 +171,57 @@ void testHashRingFindNextNode() {
     }
 }
 
-void testHashRingEvenlyDistributed() {
-    // initialise ring 
-    HashRing hr = HashRing();
-    
-    for (int i = 0; i < 10; i++) {
-        std::shared_ptr<RingNode> rn = std::make_shared<RingNode>(i, "Monkey");
-        hr.addNode(rn);
+/**
+ * Initialise a HashRing with N equally spaced nodes
+ */
+HashRing* setupAddNEquallySpacedNodes(int N) {
+    HashRing *hr = new HashRing();
+    uint32_t hash;
+    for (int i = 0; i < N; i++) {
+        hash = i * (UINT32_MAX / N);
+        std::shared_ptr<RingNode> rn = std::make_shared<RingNode>(i, "Noders");
+        hr->addNode(rn, hash);
     }
-    hr.prettyPrintHashRing();
-    std::cout << "---" << std::endl << std::endl;
+    hr->prettyPrintHashRing();
+    return hr;
+}
+
+void testHashRingEvenlyDistributed() {
+    int N = 10;
+    HashRing *hr = setupAddNEquallySpacedNodes(N);
 
     // initialise node frequency table
-    std::vector<int> nodeFreqs(10, 0);
+    std::vector<int> nodeFreqs(N, 0);
 
-    // simulate 1000 blocks being added
+    // simulate M blocks being added
+    int M = 10000000;
     std::string key = "archive.zip";
     std::hash<std::string> hashObject;
-    for (int i = 0; i < 100000; i++) {
+    for (int i = 0; i < M; i++) {
         std::string keyBlockCombo = key + std::to_string(i);
-        uint32_t hashDigest = hashObject(keyBlockCombo);
+        // uint32_t hashDigest = hashObject(keyBlockCombo);
+        uint32_t hashDigest = Crypto::sha256_32(keyBlockCombo);
 
-        uint32_t nextHash = hr.findNextNode(hashDigest);
-        std::shared_ptr<RingNode> rn = hr.getNode(nextHash);
+        uint32_t nextHash = hr->findNextNode(hashDigest);
+        std::shared_ptr<RingNode> rn = hr->getNode(nextHash);
         nodeFreqs[rn->getId()]++;
     }
 
+    // compute percentages
+    std::vector<float> nodePercs(N, 0);
+    for (int i = 0; i < N; i++) {
+        nodePercs[i] = static_cast<float>(nodeFreqs[i]) / M * 100;
+    }
+
+    std::cout << "Frequencies: ";
     PrintUtils::printVector(nodeFreqs);
+    std::cout << "Percentages: ";
+    PrintUtils::printVector(nodePercs);
+
 }
 
 int main() 
 {
     // testHashRingFindNextNode();
-    // testHashRingEvenlyDistributed();
+    testHashRingEvenlyDistributed();
 }
