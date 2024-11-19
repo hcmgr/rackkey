@@ -1,8 +1,10 @@
 ---------------------------------------
 PLAN / TODO
 ---------------------------------------
-- Master request shells
-- consistent hashing implementation
+Hash ring stuff:
+    - use sha256
+    - implement virtual nodes
+    - make sure distribution even before moving on
 
 ---------------------------------------
 SCRIBBLES

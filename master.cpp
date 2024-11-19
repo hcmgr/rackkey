@@ -32,7 +32,7 @@ public:
 void getHandler(http_request request) {
     std::cout << "get req received" << std::endl;
     
-    json::value responseJson = Utils::createPlaceholderJson();
+    json::value responseJson = ApiUtils::createPlaceholderJson();
     
     http_response response(status_codes::OK);
     response.set_body(responseJson);
@@ -49,7 +49,7 @@ void getHandler(http_request request) {
 void putHandler(http_request request) {
     std::cout << "put req received" << std::endl;
 
-    json::value responseJson = Utils::createPlaceholderJson();
+    json::value responseJson = ApiUtils::createPlaceholderJson();
     
     http_response response(status_codes::OK);
     response.set_body(responseJson);
@@ -66,7 +66,7 @@ void putHandler(http_request request) {
 void deleteHandler(http_request request) {
     std::cout << "del req received" << std::endl;
 
-    json::value responseJson = Utils::createPlaceholderJson();
+    json::value responseJson = ApiUtils::createPlaceholderJson();
     
     http_response response(status_codes::OK);
     response.set_body(responseJson);
