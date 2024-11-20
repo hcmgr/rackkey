@@ -30,6 +30,18 @@ namespace PrintUtils {
     }
 
     /**
+     * Pretty-print std::map<K, V>
+     */
+    template <typename K, typename V>
+    void printMap(const std::map<K, V>& m) {
+        std::cout << "{\n";
+        for (const auto& pair : m) {
+            std::cout << "  " << pair.first << ": " << pair.second << "\n";
+        }
+        std::cout << "}\n";
+    }
+
+    /**
      * Prints given 32-bit integer in hex form
      */
     void printHex32(uint32_t value);

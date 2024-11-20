@@ -54,12 +54,6 @@ HashRing:
             - 
         - delete node:
             -
-    - storage:
-        - ring: map<hash, VirtualRingNode>
-        - physical node list: map<id, PhysicalNode>
-    - PhysicalNode:
-        ip 
-        virtualNodeList
 
 API (client -> master):
     - endpoint: /store/{KEY}
@@ -135,6 +129,16 @@ API (master -> cluster node)
         - receives (KEY, blockNum)
         - removes BAT entry
 
-Other responsibilities:
-    - on delete of node, 
-
+Re-assignment:
+    - when node added/deleted, blocks are re-assigned
+    - this causes an update to the hash table, but blocks also need to be transferred
+      between storage nodes
+    - options:
+        - node-node comm.:
+            - i.e. storage nodes resolve this directly
+            - probs don't want fully connected graph of storage nodes
+        - master-node comm.:
+            - expose addBlock/ and deleteBlock/ endpoints
+            - i.e. for each re-assigned block:
+                - send old node an deleteBlock/ req
+                - send new node an addBlock/ req
