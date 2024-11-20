@@ -12,7 +12,6 @@ using namespace web::http::experimental::listener;
 class MasterServer {
 private:
 
-
 public:
     MasterServer() {
 

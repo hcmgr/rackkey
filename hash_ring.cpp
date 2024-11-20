@@ -3,316 +3,249 @@
 #include <string>
 #include <memory>
 
+#include "hash_ring.hpp"
 #include "utils.hpp"
 #include "crypto.hpp"
 
-/**
- * Represents a virtual node on our hash ring.
- */
-class VirtualNode 
+////////////////////////////////////////////
+// Virtual node methods
+////////////////////////////////////////////
+
+/* Default constructor */
+VirtualNode::VirtualNode(std::string id, int physicalNodeId)
+    : id(id),
+      physicalNodeId(physicalNodeId) {}
+
+/* Hash function to determine virtual node's position on the ring */
+uint32_t VirtualNode::hash()
 {
-public:
-    /**
-     * Unique id of the form: ipAddr:virtualNodeNum.
-     * 
-     * Used as hash input to determine position on the ring.
-     */
-    std::string id;
-
-    /**
-     * Physical node this virtual node points to.
-     */
-    int physicalNodeId;
-
-    VirtualNode(std::string id, int physicalNodeId)
-        : id(id),
-          physicalNodeId(physicalNodeId) {}
-    
-    uint32_t hash() 
-    {
-        return Crypto::sha256_32(this->id);
-    }
-
-    std::string toString() 
-    {
-        return this->id;
-    }
-}; 
-
-/**
- * Represents a physical storage node
- */
-class PhysicalNode {
-private:
-    static int idGenerator;
-
-public:
-    int id;
-    std::string ip;
-    int numVirtualNodes;
-    
-    /**
-     * List of physical node's virtual nodes.
-     * 
-     * We keep this around so that, when the node is deleted, we know
-     * which virtual nodes to remove (and thus which blocks to re-assign).
-     */
-    std::vector<std::shared_ptr<VirtualNode>> virtualNodes;
-
-    /**
-     * Create all virtual nodes.
-     * 
-     * Note that virtual nodes are only added to the HashRing
-     * when the physical node is added.
-     */
-    void createVirtualNodes() 
-    {
-        this->virtualNodes = std::vector<std::shared_ptr<VirtualNode>>(numVirtualNodes);
-
-        std::string virtualNodeId;
-        for (int i = 0; i < this->numVirtualNodes; i++) {
-            virtualNodeId = this->ip + ":" + std::to_string(i);
-            std::shared_ptr<VirtualNode> vn = std::make_shared<VirtualNode>(virtualNodeId, id);
-            this->virtualNodes[i] = vn;
-        }
-    }
-
-public:
-    PhysicalNode(std::string ip, int numVirtualNodes)
-        : id(idGenerator++),
-          ip(ip),
-          numVirtualNodes(numVirtualNodes)
-    {
-        createVirtualNodes();
-    }
-
-};
-int PhysicalNode::idGenerator = 0;
-
-/**
- * Represents a hash ring used for consistent hashing
- */
-class HashRing 
-{
-private:
-    /**
-     * Hash map representing our hash ring.
-     * 
-     * Use virtual ring nodes (each of which maps to a physical node)
-     * to ensure even hash distribution.
-     * 
-     * Hash values are within range [0, HASH_MODULO).
-     */
-    std::map<uint32_t, std::shared_ptr<VirtualNode> > ring;
-
-    /**
-     * Map storing our physical nodes (indexed by their unique id).
-     * 
-     * Allows fast lookup of a virtual node's corresponding physical node.
-     */
-    std::map<int, std::shared_ptr<PhysicalNode> > physicalNodes;
-
-    const uint32_t HASH_MODULO;
-
-public:
-    HashRing() 
-        : ring(),
-          physicalNodes(),
-          HASH_MODULO(UINT32_MAX) 
-    {
-    }
-
-    ~HashRing() 
-    {
-    }
-    
-    /**
-     * Adds a physical node to the ring.
-     * 
-     * In effect, this means adding all the physical node's
-     * virtual nodes to the ring.
-     * 
-     * NOTE: this triggers a re-assignment.
-     */
-    void addNode(std::string ip, int numVirtualNodes) 
-    {
-        // create and store new physical node
-        std::shared_ptr<PhysicalNode> pn = std::make_shared<PhysicalNode>(ip, numVirtualNodes);
-        this->physicalNodes[pn->id] = pn;
-
-        // add all virtual nodes to the ring
-        uint32_t hash;
-        for (auto vn : pn->virtualNodes) {
-            // compute hash
-            hash = vn->hash();
-
-            // TODO: re-assign all nodes between node and node-1 from node+1 to node
-
-            // add vn to ring
-            ring[hash] = vn;
-        }
-    }
-
-    /**
-     * Removes a physical node from the ring.
-     * 
-     * In effect, this means removing all the physical node's
-     * virtual nodes from the ring.
-     * 
-     * NOTE: this triggers a re-assignment.
-     */
-    void removeNode(int physicalNodeId) 
-    {
-        std::shared_ptr<PhysicalNode> pn = physicalNodes[physicalNodeId];
-
-        // remove virtual nodes from ring
-        uint32_t hash;
-        for (auto vn : pn->virtualNodes) 
-        {
-            // TODO: re-assign all nodes between node and node-1 from node to node+1
-
-            hash = vn->hash();
-            this->ring.erase(hash);
-        }
-
-        // remove physical node altogether
-        physicalNodes.erase(pn->id);
-    }
-
-    std::shared_ptr<VirtualNode> getNode(uint32_t hash) 
-    {
-        return this->ring[hash];
-    }
-
-    /**
-     * Returns the next node along the ring
-     */
-    std::shared_ptr<VirtualNode> findNextNode(uint32_t hash) 
-    {
-        auto it = this->ring.upper_bound(hash);
-        if (it == this->ring.end()) 
-        {
-            return this->ring.begin()->second;
-        }
-        return it->second;
-    }
-
-    void prettyPrintHashRing() 
-    {
-        int i = 0;
-        for (auto p : this->ring) 
-        {
-            uint32_t hash = p.first;
-            std::shared_ptr<VirtualNode> vn = p.second;
-
-            std::cout << "Node : " << i++ << std::endl;
-            std::cout << vn->toString() << std::endl;
-            std::cout << hash << std::endl;
-            std::cout << std::endl;
-        }
-    }
-};
-
-////////////////////////////////////////
-/////////////// TESTING ////////////////
-////////////////////////////////////////
-
-/**
- * Returns list of N sequential ip addresses starting from baseIP
- */
-std::vector<std::string> setupRandomIPs(std::string baseIP, int N) {
-    std::vector<std::string> ips;
-
-    size_t lastDot = baseIP.find_last_of('.');
-    if (lastDot == std::string::npos) {
-        std::cerr << "Invalid IP format." << std::endl;
-        return ips;
-    }
-
-    std::string base = baseIP.substr(0, lastDot + 1);
-
-    // Generate IPs starting from 0
-    for (int i = 0; i < N; ++i) {
-        ips.push_back(base + std::to_string(i));
-    }
-
-    return ips;
+    return Crypto::sha256_32(this->id);
 }
 
-void testHashRingFindNextNode() {
-    // Initialise
-    HashRing hr = HashRing();
-    int N = 10, M = 10;
+std::string VirtualNode::toString()
+{
+    return this->id;
+}
 
-    std::string baseIP = "192.168.0.0";
-    std::vector<std::string> ips = setupRandomIPs(baseIP, N);
+////////////////////////////////////////////
+// PhysicalNode methods
+////////////////////////////////////////////
 
-    for (int i = 0; i < N; i++) 
-    {
-        hr.addNode(ips[i], M);
+/* Default constructor */
+PhysicalNode::PhysicalNode(std::string ip, int numVirtualNodes)
+    : id(idGenerator++),
+      ip(ip),
+      numVirtualNodes(numVirtualNodes)
+{
+    createVirtualNodes();
+}
+
+/**
+ * Create all virtual nodes.
+ * 
+ * Note that virtual nodes are only added to the HashRing
+ * when the physical node is added.
+ */
+void PhysicalNode::createVirtualNodes() 
+{
+    this->virtualNodes = std::vector<std::shared_ptr<VirtualNode>>(numVirtualNodes);
+
+    std::string virtualNodeId;
+    for (int i = 0; i < this->numVirtualNodes; i++) {
+        virtualNodeId = this->ip + ":" + std::to_string(i);
+        std::shared_ptr<VirtualNode> vn = std::make_shared<VirtualNode>(virtualNodeId, id);
+        this->virtualNodes[i] = vn;
     }
-    hr.prettyPrintHashRing();
+}
 
-    // Find next node for 10 different blocks
-    std::string key = "archive.zip";
-    for (int i = 0; i < 10; i++) 
+int PhysicalNode::idGenerator = 0;
+
+////////////////////////////////////////////
+// HashRing Methods 
+////////////////////////////////////////////
+
+/* Default contructor*/
+HashRing::HashRing() 
+    : ring(),
+      physicalNodes(),
+      HASH_MODULO(UINT32_MAX) {}
+
+/**
+ * Adds a physical node to the ring.
+ * 
+ * In effect, this means adding all the physical node's
+ * virtual nodes to the ring.
+ * 
+ * NOTE: this triggers a re-assignment.
+ */
+void HashRing::addNode(std::string ip, int numVirtualNodes) 
+{
+    // create and store new physical node
+    std::shared_ptr<PhysicalNode> pn = std::make_shared<PhysicalNode>(ip, numVirtualNodes);
+    this->physicalNodes[pn->id] = pn;
+
+    // add all virtual nodes to the ring
+    uint32_t hash;
+    for (auto vn : pn->virtualNodes) {
+        // compute hash
+        hash = vn->hash();
+
+        // TODO: re-assign all nodes between node and node-1 from node+1 to node
+
+        // add vn to ring
+        ring[hash] = vn;
+    }
+}
+
+/**
+ * Removes a physical node from the ring.
+ * 
+ * In effect, this means removing all the physical node's
+ * virtual nodes from the ring.
+ * 
+ * NOTE: this triggers a re-assignment.
+ */
+void HashRing::removeNode(int physicalNodeId) 
+{
+    std::shared_ptr<PhysicalNode> pn = physicalNodes[physicalNodeId];
+
+    // remove virtual nodes from ring
+    uint32_t hash;
+    for (auto vn : pn->virtualNodes) 
     {
-        std::string keyBlockCombo = key + std::to_string(i);
-        uint32_t hash = Crypto::sha256_32(keyBlockCombo);
-        std::cout << keyBlockCombo << " : " << hash << std::endl;
+        // TODO: re-assign all nodes between node and node-1 from node to node+1
 
-        std::shared_ptr<VirtualNode> nextVn = hr.findNextNode(hash);
-        std::cout << "Next node : " << nextVn->toString() << std::endl;
+        hash = vn->hash();
+        this->ring.erase(hash);
+    }
+
+    // remove physical node altogether
+    physicalNodes.erase(pn->id);
+}
+
+/* Finds and returns next node along the ring */
+std::shared_ptr<VirtualNode> HashRing::findNextNode(uint32_t hash) 
+{
+    auto it = this->ring.upper_bound(hash);
+    if (it == this->ring.end()) 
+    {
+        return this->ring.begin()->second;
+    }
+    return it->second;
+}
+
+/* Pretty prints all virtual nodes of the HashRing, in order */
+void HashRing::prettyPrintHashRing() 
+{
+    int i = 0;
+    for (auto p : this->ring) 
+    {
+        uint32_t hash = p.first;
+        std::shared_ptr<VirtualNode> vn = p.second;
+
+        std::cout << "Node : " << i++ << std::endl;
+        std::cout << vn->toString() << std::endl;
+        std::cout << hash << std::endl;
         std::cout << std::endl;
     }
 }
 
-void testHashRingEvenlyDistributed() {
-    // Initialise
-    HashRing hr = HashRing();
-    int N = 3, M = 100;
+////////////////////////////////////////////
+// HashRing Testing
+////////////////////////////////////////////
 
-    std::string baseIP = "192.168.0.0";
-    std::vector<std::string> ips = setupRandomIPs(baseIP, N);
+namespace HashRingTests {
 
-    for (int i = 0; i < N; i++) 
-    {
-        hr.addNode(ips[i], M);
+    /**
+     * Returns list of N sequential ip addresses starting from baseIP
+     */
+    std::vector<std::string> setupRandomIPs(std::string baseIP, int N) {
+        std::vector<std::string> ips;
+
+        size_t lastDot = baseIP.find_last_of('.');
+        if (lastDot == std::string::npos) {
+            std::cerr << "Invalid IP format." << std::endl;
+            return ips;
+        }
+
+        std::string base = baseIP.substr(0, lastDot + 1);
+
+        // Generate IPs starting from 0
+        for (int i = 0; i < N; ++i) {
+            ips.push_back(base + std::to_string(i));
+        }
+
+        return ips;
     }
 
-    // stores frequency count of each physical node (maps: id -> freq)
-    std::map<int, int> physicalNodeFreqs;
+    void testHashRingFindNextNode() {
+        // Initialise
+        HashRing hr = HashRing();
+        int N = 10, M = 10;
 
-    // simulate M blocks being assigned
-    int numBlocks = 100000;
-    std::string key = "archive.zip";
-    for (int i = 0; i < numBlocks; i++) 
-    {
-        std::string keyBlockCombo = key + std::to_string(i);
-        uint32_t hash = Crypto::sha256_32(keyBlockCombo);
+        std::string baseIP = "192.168.0.0";
+        std::vector<std::string> ips = setupRandomIPs(baseIP, N);
 
-        std::shared_ptr<VirtualNode> nextVn = hr.findNextNode(hash);
-        int physicalNodeId = nextVn->physicalNodeId;
-        if (physicalNodeFreqs.find(physicalNodeId) == physicalNodeFreqs.end())
-            physicalNodeFreqs[physicalNodeId] = 0;
-        physicalNodeFreqs[physicalNodeId]++;
+        for (int i = 0; i < N; i++) 
+        {
+            hr.addNode(ips[i], M);
+        }
+        hr.prettyPrintHashRing();
+
+        // Find next node for 10 different blocks
+        std::string key = "archive.zip";
+        for (int i = 0; i < 10; i++) 
+        {
+            std::string keyBlockCombo = key + std::to_string(i);
+            uint32_t hash = Crypto::sha256_32(keyBlockCombo);
+            std::cout << keyBlockCombo << " : " << hash << std::endl;
+
+            std::shared_ptr<VirtualNode> nextVn = hr.findNextNode(hash);
+            std::cout << "Next node : " << nextVn->toString() << std::endl;
+            std::cout << std::endl;
+        }
     }
 
-    // compute percentages
-    std::map<int, float> physicalNodePercs;
-    for (auto p : physicalNodeFreqs) {
-        physicalNodePercs[p.first] = static_cast<float>(p.second) / numBlocks * 100;
+    void testHashRingEvenlyDistributed() {
+        // Initialise
+        HashRing hr = HashRing();
+        int N = 3, M = 100;
+
+        std::string baseIP = "192.168.0.0";
+        std::vector<std::string> ips = setupRandomIPs(baseIP, N);
+
+        for (int i = 0; i < N; i++) 
+        {
+            hr.addNode(ips[i], M);
+        }
+
+        // stores frequency count of each physical node (maps: id -> freq)
+        std::map<int, int> physicalNodeFreqs;
+
+        // simulate M blocks being assigned
+        int numBlocks = 100000;
+        std::string key = "archive.zip";
+        for (int i = 0; i < numBlocks; i++) 
+        {
+            std::string keyBlockCombo = key + std::to_string(i);
+            uint32_t hash = Crypto::sha256_32(keyBlockCombo);
+
+            std::shared_ptr<VirtualNode> nextVn = hr.findNextNode(hash);
+            int physicalNodeId = nextVn->physicalNodeId;
+            if (physicalNodeFreqs.find(physicalNodeId) == physicalNodeFreqs.end())
+                physicalNodeFreqs[physicalNodeId] = 0;
+            physicalNodeFreqs[physicalNodeId]++;
+        }
+
+        // compute percentages
+        std::map<int, float> physicalNodePercs;
+        for (auto p : physicalNodeFreqs) {
+            physicalNodePercs[p.first] = static_cast<float>(p.second) / numBlocks * 100;
+        }
+
+        std::cout << "Frequencies : ";
+        PrintUtils::printMap(physicalNodeFreqs);
+        std::cout << "Percentages : ";
+        PrintUtils::printMap(physicalNodePercs);
     }
-
-    std::cout << "Frequencies : ";
-    PrintUtils::printMap(physicalNodeFreqs);
-    std::cout << "Percentages : ";
-    PrintUtils::printMap(physicalNodePercs);
-}
-
-int main() 
-{
-    // testHashRingInit();
-    // testHashRingFindNextNode();
-    testHashRingEvenlyDistributed();
-}
+};
