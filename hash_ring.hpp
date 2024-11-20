@@ -125,3 +125,13 @@ public:
     /* Pretty prints all virtual nodes of the HashRing, in order */
     void prettyPrintHashRing();
 };
+
+namespace HashRingTests 
+{
+    /**
+     * Returns list of N sequential ip addresses starting from baseIP
+     */
+    std::vector<std::string> setupRandomIPs(std::string baseIP, int N);
+    void testHashRingFindNextNode();
+    void testHashRingEvenlyDistributed();
+};

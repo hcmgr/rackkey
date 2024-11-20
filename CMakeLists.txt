@@ -10,20 +10,12 @@ find_package(cpprestsdk REQUIRED)
 find_package(OpenSSL REQUIRED)  # Note the capital letters
 
 # Add executables
-add_executable(master master.cpp utils.cpp)
-add_executable(hash_ring hash_ring.cpp utils.cpp crypto.cpp)
+add_executable(master master.cpp utils.cpp config.cpp hash_ring.cpp crypto.cpp)
 
-# Link cpprestsdk and OpenSSL libraries
 target_link_libraries(master PRIVATE 
-    cpprestsdk::cpprest
-    OpenSSL::Crypto
-)
-
-target_link_libraries(hash_ring PRIVATE 
     cpprestsdk::cpprest
     OpenSSL::Crypto
 )
 
 # Include OpenSSL directories
 target_include_directories(master PRIVATE ${OPENSSL_INCLUDE_DIR})
-target_include_directories(hash_ring PRIVATE ${OPENSSL_INCLUDE_DIR})

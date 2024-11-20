@@ -154,8 +154,8 @@ void HashRing::prettyPrintHashRing()
 // HashRing Testing
 ////////////////////////////////////////////
 
-namespace HashRingTests {
-
+namespace HashRingTests 
+{
     /**
      * Returns list of N sequential ip addresses starting from baseIP
      */

@@ -1,7 +1,12 @@
 ---------------------------------------
 PLAN / TODO
 ---------------------------------------
-
+- work on client->master api
+    - master reads init nodes from config file
+    - PUT:
+        - split incoming file into blocks
+        - add entries to KBN 
+        - distribute blocks to their requisite nodes
 
 ---------------------------------------
 SCRIBBLES
