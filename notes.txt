@@ -41,15 +41,25 @@ KBN:
 
 HashRing:
     - nodes evenly distributed around ring of (2^32 - 1) values
-    - when used:
-        - when add block (PUT):
-            - use hash(key + blockNum) to determine place on ring and thus,
-              what node to store on
-        - when delete a node, use ring to de-assign blocks of deleted node
     - use virtual nodes to ensure even distribution in 'low-node' environment
         - each physical node has N virtual nodes
         - blocks are assigned to a virtual node, which implictly assigns
           it to a physical node
+    - flow:
+        - add block (PUT):
+            - compute hash(key + blockNum)
+            - find nearest virtual node, which stores its physical node id
+            - lookup in physical node table to find IP
+        - add node:
+            - 
+        - delete node:
+            -
+    - storage:
+        - ring: map<hash, VirtualRingNode>
+        - physical node list: map<id, PhysicalNode>
+    - PhysicalNode:
+        ip 
+        virtualNodeList
 
 API (client -> master):
     - endpoint: /store/{KEY}
