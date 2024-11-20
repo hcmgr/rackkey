@@ -1,10 +1,11 @@
 {
-    "numStorageNodes": 5,
+    "masterServerIPPort": "http://localhost:8082",
     "storageNodeIPs": [
         "192.168.1.10",
         "192.168.1.11",
         "192.168.1.13",
         "192.168.1.14",
         "192.168.1.15"
-    ]
+    ],
+    "numVirtualNodes": 50
 }

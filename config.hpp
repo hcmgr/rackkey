@@ -28,17 +28,34 @@ private:
     void loadConfigAsJson();
 
     /**
-     * Load the storage IP addresses.
+     * Load all config of storage nodes.
      * 
      * NOTE: is/should be called after loadConfigAsJson()
      */
-    void loadStorageNodeIPs();
+    void loadStorageNodeConfig();
+
+    /**
+     * Load all config of Master server.
+     * 
+     * NOTE: is/should be called after loadConfigAsJson()
+     */
+    void loadMasterServerConfig();
 
 public:
     /**
      * IP addresses of all storage nodes given in our config.json.
      */
     std::vector<std::string> storageNodeIPs;
+
+    /**
+     * Number of virtual hash ring nodes created for each physical node
+     */
+    int numVirtualNodes;
+
+    /**
+     * IP/Port our Master server is listening on.
+     */
+    std::string masterServerIPPort;
 
     /* Default constructor */
     Config(std::string configFilePath);

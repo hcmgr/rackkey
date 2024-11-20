@@ -15,7 +15,7 @@ class VirtualNode
 {
 public:
     /**
-     * Unique id of the form: ipAddr:virtualNodeNum.
+     * Unique id of the form: ip:virtualNodeNum.
      * 
      * Used as hash input to determine position on the ring.
      */
@@ -67,7 +67,6 @@ public:
 
     /* Default constructor */
     PhysicalNode(std::string ip, int numVirtualNodes);
-
 };
 
 /**
@@ -87,7 +86,7 @@ private:
     std::map<uint32_t, std::shared_ptr<VirtualNode> > ring;
 
     /**
-     * Map storing our physical nodes (indexed by their unique id).
+     * Map storing our physical storage nodes (indexed by their unique id).
      * 
      * Allows fast lookup of a virtual node's corresponding physical node.
      */
@@ -100,7 +99,7 @@ public:
     HashRing();
 
     /**
-     * Adds a physical node to the ring.
+     * Creates a physical node for the given ip and adds it to the ring.
      * 
      * In effect, this means adding all the physical node's
      * virtual nodes to the ring.
@@ -110,7 +109,7 @@ public:
     void addNode(std::string ip, int numVirtualNodes);
 
     /**
-     * Removes a physical node from the ring.
+     * Removes the given physical node from the ring.
      * 
      * In effect, this means removing all the physical node's
      * virtual nodes from the ring.
