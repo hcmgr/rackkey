@@ -11,7 +11,6 @@ namespace ApiUtils {
     json::value createPlaceholderJson() 
     {
         json::value responseJson;
-        responseJson[U("message")] = json::value::string(U("Hello"));
         responseJson[U("status")] = json::value::number(200);
         return responseJson;
     }

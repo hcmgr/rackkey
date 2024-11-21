@@ -43,6 +43,11 @@ private:
 
 public:
     /**
+     * IP/Port our Master server is listening on.
+     */
+    std::string masterServerIPPort;
+
+    /**
      * IP addresses of all storage nodes given in our config.json.
      */
     std::vector<std::string> storageNodeIPs;
@@ -53,9 +58,9 @@ public:
     int numVirtualNodes;
 
     /**
-     * IP/Port our Master server is listening on.
+     * Storage node block size (in bytes)
      */
-    std::string masterServerIPPort;
+    int blockSize;
 
     /* Default constructor */
     Config(std::string configFilePath);

@@ -86,7 +86,9 @@ private:
     std::map<uint32_t, std::shared_ptr<VirtualNode> > ring;
 
     /**
-     * Map storing our physical storage nodes (indexed by their unique id).
+     * Stores our physical storage nodes.
+     * 
+     * Maps unique storage node id -> PhysicalNode.
      * 
      * Allows fast lookup of a virtual node's corresponding physical node.
      */

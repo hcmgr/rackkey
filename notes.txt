@@ -2,11 +2,8 @@
 PLAN / TODO
 ---------------------------------------
 - work on client->master api
-    - master reads init nodes from config file
     - PUT:
-        - split incoming file into blocks
-        - add entries to KBN 
-        - distribute blocks to their requisite nodes
+        - for now, just see if can send back 'unharmed'
 
 ---------------------------------------
 SCRIBBLES
@@ -25,8 +22,21 @@ MasterServer:
             - need for PUT, addNode and deleteNode 
         - KBN map
 
+Handling duplicates KEYs (i.e. when PUT gives key that's already used):
+    - for now, automatically overrides
+    - rationale:
+        - want a ligthweight API that can be easily accessed via curl
+        - therefore, 'are you sure?' messages upon overwritting is not 
+          really what we want
+        - can have a GET endpoint /keys that gives you a list of keys
+          in use and their files sizes / num blocks used
 
-
+// don't persist, just use to organise data whilst reading/writing
+Block class:
+    blockNum;
+    size;
+    data;
+    
 ---------------------------------------
 IMPLEMENTATION DETAILS
 ---------------------------------------

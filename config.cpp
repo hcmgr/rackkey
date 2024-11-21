@@ -43,6 +43,9 @@ void Config::loadStorageNodeConfig()
 
     // retreive number of virtual nodes
     this->numVirtualNodes = this->jsonConfig.at(U("numVirtualNodes")).as_integer();
+
+    // retreive block size
+    this->blockSize = this->jsonConfig.at(U("blockSize")).as_integer();
 }
 
 /**

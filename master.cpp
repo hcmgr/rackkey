@@ -3,6 +3,7 @@
 #include <cpprest/http_client.h>
 #include <iostream>
 #include <map>
+#include <chrono>
 
 #include "hash_ring.hpp"
 #include "utils.hpp"
@@ -11,6 +12,33 @@
 using namespace web;
 using namespace web::http;
 using namespace web::http::experimental::listener;
+
+/**
+ * Represents an I/O block.
+ * 
+ * NOTE: Block objects only help organise I/O and are NOT kept 
+ *       around in memory. i.e. they last the duration of the
+ *       GET/PUT request.
+ */
+class Block {
+public:
+    int blockNum;
+    int size;
+    std::vector<unsigned char> data;
+
+    Block(int blockNum, int size, std::vector<unsigned char> data) 
+        : blockNum(blockNum),
+          size(size),
+          data(data)
+    {
+    }
+
+    void prettyPrintBlock() 
+    {
+        std::cout << "Block: " << blockNum << std::endl;
+        std::cout << "size: " << size << " bytes" << std::endl;
+    }
+};
 
 class MasterServer 
 {
@@ -31,15 +59,15 @@ public:
     HashRing hashRing;
 
     /**
-     * Mapping of the form: KEY -> {blockNum -> nodeNum}.
+     * Mapping of the form: KEY -> {blockNum -> storageNodeId}.
      * 
-     * i.e. for each KEY, we store a mapping from block number to node number.
+     * i.e. for each KEY, we store a mapping from block number to storage node
      * 
      * Allows for fast lookup of block location.
      * 
      * NOTE: nicknamed the 'KBN' for brevity
      */
-    std::map<std::string, std::map<int, int> > keyBlockNodeMap;
+    std::map<std::string, std::shared_ptr<std::map<int, int>> > keyBlockNodeMap;
 
     /**
      * Stores configuration of our service (e.g. storage node IPs)
@@ -61,6 +89,30 @@ public:
     }
 
     /**
+     * Calculates and displays the blocks distribution
+     * across the storage nodes.
+     */
+    void calculateAndShowBlockDistribution() {
+        std::map<int, int> nodeBlockCounts;
+
+        for (auto p : this->keyBlockNodeMap) 
+        {
+            std::string key = p.first;
+            std::shared_ptr<std::map<int, int>> blockNodeMap = p.second;
+
+            for (auto p : *blockNodeMap) 
+            {
+                if (nodeBlockCounts.find(p.second) == nodeBlockCounts.end())
+                    nodeBlockCounts[p.second] = 0;
+
+                nodeBlockCounts[p.second]++;
+            }
+        }
+
+        PrintUtils::printMap(nodeBlockCounts);
+    }
+
+    /**
      * GET
      * ---
      * Given: (KEY)
@@ -68,14 +120,6 @@ public:
      */
     void getHandler(http_request request) 
     {
-        std::cout << "get req received" << std::endl;
-        
-        json::value responseJson = ApiUtils::createPlaceholderJson();
-        
-        http_response response(status_codes::OK);
-        response.set_body(responseJson);
-        
-        request.reply(response);
     }
 
     /**
@@ -87,12 +131,77 @@ public:
     void putHandler(http_request request) 
     {
         std::cout << "put req received" << std::endl;
-
-        json::value responseJson = ApiUtils::createPlaceholderJson();
         
+        // TODO: extract {KEY} from request
+        std::string key = "archive.zip";
+
+        auto start = std::chrono::high_resolution_clock::now();
+        std::cout << "1" << std::endl;
+        
+        pplx::task<void> task = request.extract_vector()
+
+        // break up payload into blocks (i.e. build up 'blockList')
+        .then([&](std::vector<unsigned char> payload)
+        {
+            std::cout << "2" << std::endl;
+            std::shared_ptr<std::vector<Block>> blockList = std::make_shared<std::vector<Block>>();
+
+            int payloadSize = payload.size();
+            int blockCnt = 0;
+
+            for (int i = 0; i < payloadSize; i += config.blockSize) {
+                size_t blockEnd = std::min(i + config.blockSize, payloadSize);
+                std::vector<unsigned char> blockData(payload.begin() + i, payload.begin() + blockEnd);
+                blockList->emplace_back(blockCnt++, blockData.size(), std::move(blockData));
+            }
+
+            std::cout << "3" << std::endl;
+            return blockList;
+        })
+
+        // send each block, building up block->node map in the process
+        .then([&](std::shared_ptr<std::vector<Block>> blockList) 
+        {
+            std::shared_ptr<std::map<int, int>> blockNodeMap = std::make_shared<std::map<int, int>>();
+            for (Block &block : *blockList) 
+            {
+                // find storage node
+                std::string hashInput = key + std::to_string(block.blockNum);
+                uint32_t hash = Crypto::sha256_32(hashInput);
+                std::shared_ptr<VirtualNode> vn = this->hashRing.findNextNode(hash);
+                int physicalNodeId = vn->physicalNodeId;
+
+                // TODO: write block to physical node, only continue on success
+
+                // add block->node entry
+                blockNodeMap->insert({block.blockNum, physicalNodeId});
+            }
+            std::cout << "4" << std::endl;
+
+            return blockNodeMap;
+        })
+
+        // add block->node mapping to KBN
+        .then([&](std::shared_ptr<std::map<int, int>> blockNodeMap) 
+        {
+            this->keyBlockNodeMap[key] = blockNodeMap;
+            std::cout << "5" << std::endl;
+        });
+
+        task.wait();
+
+        calculateAndShowBlockDistribution();
+        std::cout << "6" << std::endl;
+
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+
+        std::cout << "Time: " << duration.count() << " ms" << std::endl;
+
+        // send resposne
+        json::value responseJson = ApiUtils::createPlaceholderJson();
         http_response response(status_codes::OK);
         response.set_body(responseJson);
-        
         request.reply(response);
     }
 
@@ -104,14 +213,6 @@ public:
      */
     void deleteHandler(http_request request) 
     {
-        std::cout << "del req received" << std::endl;
-
-        json::value responseJson = ApiUtils::createPlaceholderJson();
-        
-        http_response response(status_codes::OK);
-        response.set_body(responseJson);
-        
-        request.reply(response);
     }
 
     void startServer() {
@@ -122,7 +223,7 @@ public:
         listener.support(methods::GET, [this](http_request request) {
             this->getHandler(request);
         });
-        listener.support(methods::POST, [this](http_request request) {
+        listener.support(methods::PUT, [this](http_request request) {
             this->putHandler(request);
         });
         listener.support(methods::DEL, [this](http_request request) {
