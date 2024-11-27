@@ -1,0 +1,37 @@
+version: '3.8'
+services:
+
+  ##########################
+  storage-node-1:
+    image: example-server  
+    build:
+      context: . 
+    ports:
+      - "8081:8080"  
+    environment:
+      - PORT=8080  
+      - NODE_ID=1
+    restart: always
+
+  storage-node-2:
+    image: example-server
+    build:
+      context: .
+    ports:
+      - "8082:8080" 
+    environment:
+      - PORT=8080
+      - NODE_ID=2
+    restart: always
+
+  storage-node-3:
+    image: example-server
+    build:
+      context: .
+    ports:
+      - "8083:8080"  
+    environment:
+      - PORT=8080
+      - NODE_ID=3
+    restart: always
+  ##########################
