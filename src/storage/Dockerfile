@@ -7,9 +7,10 @@ WORKDIR /app
 COPY requirements.txt /app
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY server.py /app
+# Get code
+COPY storage_test_server.py /app
 
 ## NOTE: docker compose exposes our ports for us
 
 # Run
-CMD ["python3", "server.py"]
+CMD ["python3", "storage_test_server.py"]
