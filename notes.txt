@@ -1,16 +1,16 @@
 ---------------------------------------
 PLAN / TODO
 ---------------------------------------
-- work on client->master api
-    - PUT:
-        - for now, just see if can send back 'unharmed'
+- clean up PUT
+- re-write current python server in cpprest c++
+- try just returning blocks in order
+    - i.e. blocks in order is what storage should return anyway
+- try re-assembling blocks to produce the file
+- do it on a zip file and see if its unharmed
 
 ---------------------------------------
 SCRIBBLES
 ---------------------------------------
-Put plan:
-    - send all blocks assigned to that node at once (i.e. in one http req)
-
 Handling duplicates KEYs (i.e. when PUT gives key that's already used):
     - for now, automatically overrides
     - rationale:
@@ -20,12 +20,6 @@ Handling duplicates KEYs (i.e. when PUT gives key that's already used):
         - can have a GET endpoint /keys that gives you a list of keys
           in use and their files sizes / num blocks used
 
-// don't persist, just use to organise data whilst reading/writing
-Block class:
-    blockNum;
-    size;
-    data;
-    
 ---------------------------------------
 IMPLEMENTATION DETAILS
 ---------------------------------------
