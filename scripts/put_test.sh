@@ -1,1 +1,1 @@
-curl -X PUT localhost:8082 -d @in/73MB.csv
+curl -X PUT localhost:9000 -d @in/2MB.csv

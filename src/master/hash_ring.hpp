@@ -26,7 +26,7 @@ public:
 
     /* Default constructor */
     VirtualNode(std::string id, int physicalNodeId);
-    
+
     /* Hash function to determine virtual node's position on the ring */
     uint32_t hash();
 
@@ -100,6 +100,8 @@ public:
     /* Default constructor */
     HashRing();
 
+
+
     /**
      * Creates a physical node for the given ip and adds it to the ring.
      * 
@@ -120,8 +122,11 @@ public:
      */
     void removeNode(int physicalNodeId);
 
-    /* Finds and returns next node along the ring */
+    /* Finds and returns next (virtual) node along the ring */
     std::shared_ptr<VirtualNode> findNextNode(uint32_t hash);
+
+    /* Return physical node of the given id */
+    std::shared_ptr<PhysicalNode> getPhysicalNode(int id);
 
     /* Pretty prints all virtual nodes of the HashRing, in order */
     void prettyPrintHashRing();

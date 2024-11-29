@@ -134,6 +134,12 @@ std::shared_ptr<VirtualNode> HashRing::findNextNode(uint32_t hash)
     return it->second;
 }
 
+/* Return physical node of the given id */
+std::shared_ptr<PhysicalNode> HashRing::getPhysicalNode(int id)
+{
+    return this->physicalNodes[id];
+}
+
 /* Pretty prints all virtual nodes of the HashRing, in order */
 void HashRing::prettyPrintHashRing() 
 {
