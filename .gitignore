@@ -4,3 +4,4 @@ out
 build
 *.out
 notes.txt
+venv
