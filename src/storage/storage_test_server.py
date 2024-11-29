@@ -80,14 +80,12 @@ def handle_put():
     # Deserialize the blocks
     blocks = deserialize_blocks(serialized_data)
 
-    # Print out the deserialized blocks
-    
     for block in blocks:
         print(f"\n###########################", file=f)
         print(f"Key: {block['key']}", file=f)
         print(f"Block Number: {block['block_num']}", file=f)
         print(f"Size: {block['size']}", file=f)
-        print(f"Data: {block['data']}", file=f)  # Print data as a hex string for readability
+        # print(f"Data: {block['data']}", file=f)  # Print data as a hex string for readability
         print(f"###########################\n", file=f)
 
     return jsonify(message=f"hello there from node: {nodeId}")
