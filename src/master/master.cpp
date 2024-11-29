@@ -219,8 +219,6 @@ public:
         req.set_request_uri(U("/"));
         req.set_body(payloadBuffer);
 
-        std::cout << "Sending: " << blocks.size() << " blocks" << std::endl;
-
         pplx::task<void> task = client.request(req)
             // send request
             .then([=](http_response response) 
@@ -255,7 +253,7 @@ public:
         std::cout << "put req received" << std::endl;
 
         // TODO: extract {KEY} from request
-        std::string key = "archive.zip";
+        std::string key = "family_guy.zip";
 
         // Timing point: start
         auto start = std::chrono::high_resolution_clock::now();
@@ -273,6 +271,7 @@ public:
             auto blockStart = std::chrono::high_resolution_clock::now();
             std::cout << "TIME - extract: " 
                   << std::chrono::duration_cast<std::chrono::milliseconds>(blockStart - start).count() 
+                  << " ms"
                   << std::endl;
             
             *payloadPtr = std::move(payload);
@@ -298,9 +297,12 @@ public:
                 nodeBlockMap[vn->physicalNodeId].push_back(std::move(block));
             }
 
+            std::cout << "Total blocks: " << blockCnt << std::endl;
+
             auto blockEnd = std::chrono::high_resolution_clock::now();
             std::cout << "TIME - block: " 
                   << std::chrono::duration_cast<std::chrono::milliseconds>(blockEnd - blockStart).count() 
+                  << " ms"
                   << std::endl;
 
             return nodeBlockMap;
@@ -328,6 +330,7 @@ public:
                 auto sendEnd = std::chrono::high_resolution_clock::now();
                 std::cout << "TIME - send & receive: " 
                   << std::chrono::duration_cast<std::chrono::milliseconds>(sendEnd - sendStart).count() 
+                  << " ms"
                   << std::endl;
 
                 this->keyBlockNodeMap[key] = blockNodeMap;
