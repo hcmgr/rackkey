@@ -1,16 +1,15 @@
-Distributed key value store in C++
-
+Distributed key value store in C++ (work in progress)
 
 ### Installation
-`git clone {}`
-`cd rackkey`
-`brew install cpprestsdk`
-`mkdir build`
-`cd build`
-`cmake ..`
-`make`
-`./master`
+```bash
+git clone https://github.com/hcmgr/rackkey.git
+cd rackkey
+brew install cpprestsdk
+mkdir build
+cd build
+cmake ..
+make
+```
 
-
-### Running ###
-
+### Run
+TODO

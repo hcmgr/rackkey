@@ -25,12 +25,19 @@ class Block {
 public:
     int blockNum;
     int size;
-    std::vector<unsigned char> data;
+    std::vector<unsigned char>::iterator start;
+    std::vector<unsigned char>::iterator end;
 
-    Block(int blockNum, int size, std::vector<unsigned char> data) 
+    Block(
+        int blockNum,
+        int size,
+        std::vector<unsigned char>::iterator start,
+        std::vector<unsigned char>::iterator end
+    ) 
         : blockNum(blockNum),
           size(size),
-          data(data)
+          start(start),
+          end(end)
     {
     }
 
@@ -69,6 +76,11 @@ public:
      * NOTE: nicknamed the 'KBN' for brevity
      */
     std::map<std::string, std::shared_ptr<std::map<int, int>> > keyBlockNodeMap;
+
+    /**
+     * Current open connections 
+     */
+    std::map<int, std::shared_ptr<http_client>> openConnections;
 
     /**
      * Stores configuration of our service (e.g. storage node IPs)
@@ -124,11 +136,11 @@ public:
         std::cout << "get req received" << std::endl;
 
         // Create HTTP client
-        http_client client(U("http://192.168.0.24:8083"));
+        http_client client(U("http://192.168.0.24:8082"));
 
         // Send a GET request
         client.request(methods::GET, U("/"))
-            .then([](http_response response) {
+            .then([&](http_response response) {
                 if (response.status_code() == status_codes::OK) {
                     // Parse the response body as JSON
                     json::value jsonResponse = response.extract_json().get();
@@ -143,6 +155,49 @@ public:
     }
 
     /**
+     * Send block to designated storage node
+     */
+    pplx::task<void> sendBlocks(
+        int physicalNodeId,
+        std::vector<Block> &blocks,
+        std::shared_ptr<std::map<int, int>> blockNodeMap
+    )
+    {
+        std::cout << "Sending blocks to node: " << physicalNodeId << std::endl;
+
+        std::shared_ptr<PhysicalNode> pn = this->hashRing.getPhysicalNode(physicalNodeId);
+
+        if (this->openConnections.find(pn->id) == this->openConnections.end())
+            this->openConnections[pn->id] = std::make_shared<http_client>(U(pn->ip));
+        http_client& client = *this->openConnections[pn->id];
+
+        // TODO: fill request with data
+
+        pplx::task<void> task = client.request(methods::GET, U("/"))
+            // send request
+            .then([=](http_response response) 
+            {
+                if (response.status_code() == status_codes::OK) {
+                    std::cout << "resp received from node: " << physicalNodeId << std::endl;
+                    json::value jsonResponse = response.extract_json().get();
+                } else {
+                    std::cout << "Request failed with status: " << response.status_code() << std::endl;
+                }
+            })
+
+            // assign blocks to their nodes
+            .then([=]()
+            {
+                for (auto block : blocks)
+                {
+                    blockNodeMap->insert({block.blockNum, physicalNodeId});
+                }
+            });
+
+        return task;
+    }
+
+    /**
      * PUT
      * ---
      * Given: (KEY, payload)
@@ -151,192 +206,86 @@ public:
     void putHandler(http_request request) 
     {
         std::cout << "put req received" << std::endl;
-        
-        // TODO: extract {KEY} from request
-        std::string key = "archive.zip";
-
-        auto start = std::chrono::high_resolution_clock::now();
-        std::cout << "1" << std::endl;
-        
-        pplx::task<void> task = request.extract_vector()
-
-        // break up payload into blocks (i.e. build up 'blockList')
-        .then([&](std::vector<unsigned char> payload)
-        {
-            std::cout << "2" << std::endl;
-            std::shared_ptr<std::vector<Block>> blockList = std::make_shared<std::vector<Block>>();
-
-            int payloadSize = payload.size();
-            int blockCnt = 0;
-
-            for (int i = 0; i < payloadSize; i += config.blockSize) {
-                size_t blockEnd = std::min(i + config.blockSize, payloadSize);
-                std::vector<unsigned char> blockData(payload.begin() + i, payload.begin() + blockEnd);
-                blockList->emplace_back(blockCnt++, blockData.size(), std::move(blockData));
-            }
-
-            std::cout << "3" << std::endl;
-            return blockList;
-        })
-
-        // send each block, building up block->node map in the process
-        .then([&](std::shared_ptr<std::vector<Block>> blockList) 
-        {
-            std::shared_ptr<std::map<int, int>> blockNodeMap = std::make_shared<std::map<int, int>>();
-            for (Block &block : *blockList) 
-            {
-                // find storage node
-                std::string hashInput = key + std::to_string(block.blockNum);
-                uint32_t hash = Crypto::sha256_32(hashInput);
-                std::shared_ptr<VirtualNode> vn = this->hashRing.findNextNode(hash);
-                int physicalNodeId = vn->physicalNodeId;
-
-                // TODO: write block to physical node, only continue on success
-
-                // add block->node entry
-                blockNodeMap->insert({block.blockNum, physicalNodeId});
-            }
-            std::cout << "4" << std::endl;
-
-            return blockNodeMap;
-        })
-
-        // add block->node mapping to KBN
-        .then([&](std::shared_ptr<std::map<int, int>> blockNodeMap) 
-        {
-            this->keyBlockNodeMap[key] = blockNodeMap;
-            std::cout << "5" << std::endl;
-        });
-
-        task.wait();
-
-        calculateAndShowBlockDistribution();
-        std::cout << "6" << std::endl;
-
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
-        std::cout << "Time: " << duration.count() << " ms" << std::endl;
-
-        // send resposne
-        json::value responseJson = ApiUtils::createPlaceholderJson();
-        http_response response(status_codes::OK);
-        response.set_body(responseJson);
-        request.reply(response);
-    }
-
-    /**
-     * PUT (fast)
-     * ---
-     * Given: (KEY, payload)
-     * Breaks payload into blocks and distributes them across the storage cluster
-     */
-    void putHandlerFast(http_request request) 
-    {
-        std::cout << "put req received" << std::endl;
 
         // TODO: extract {KEY} from request
         std::string key = "archive.zip";
 
         // Timing point: start
         auto start = std::chrono::high_resolution_clock::now();
-        std::cout << "Start: " 
-                  << std::chrono::duration_cast<std::chrono::milliseconds>(start - start).count() 
-                  << std::endl;
+            
+        std::shared_ptr<std::map<int, int>> blockNodeMap = std::make_shared<std::map<int, int>>();
+        std::vector<pplx::task<void>> blockSendTasks;
 
-        /**
-         * NOTE:
-         * 
-         * The handler is called instantly, but for large files,
-         * the data takes time to arrive.
-         * 
-         * Therefore, want extract_vector to be asynchronous and 
-         * non-blocking so it can wait for all the data to arrive.
-         */
         pplx::task<void> task = request.extract_vector()
+
+        // divide into blocks
         .then([&](std::vector<unsigned char> payload)
         {
-            // Timing point: after extracting the payload
-            auto t2 = std::chrono::high_resolution_clock::now();
-            std::cout << "After extracting the payload: "
-                      << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - start).count() 
-                      << std::endl;
-
+            auto blockStart = std::chrono::high_resolution_clock::now();
+            std::cout << "TIME - extract: " 
+                  << std::chrono::duration_cast<std::chrono::milliseconds>(blockStart - start).count() 
+                  << std::endl;
+                  
             int payloadSize = payload.size();
             int blockCnt = 0;
 
-            std::shared_ptr<std::map<int, int>> blockNodeMap = std::make_shared<std::map<int, int>>();
+            std::map<int, std::vector<Block>> nodeBlockMap;
 
             for (int i = 0; i < payloadSize; i += config.blockSize) 
             {
-                /////////////////////////////
-                // ALTER: ALTERNATIVE METHOD
-                /////////////////////////////
-                /**
-                 * Instead of the expensive copy into blockData, just
-                 * reference the payload directly
-                 */
-
-                // new way 
-                size_t blockEnd = std::min(i + config.blockSize, payloadSize);
-                auto blockBegin = payload.begin() + i;
-                auto blockEndIter = payload.begin() + blockEnd;
-                // sendBlockData(blockBegin, blockEndIter);
-
-                // old way
-                // size_t blockEnd = std::min(i + config.blockSize, payloadSize);
-                // std::vector<unsigned char> blockData(payload.begin() + i, payload.begin() + blockEnd);
-
                 int blockNum = blockCnt++;
 
-                // find storage node
                 std::string hashInput = key + std::to_string(blockNum);
                 uint32_t hash = Crypto::sha256_32(hashInput);
                 std::shared_ptr<VirtualNode> vn = this->hashRing.findNextNode(hash);
-                int physicalNodeId = vn->physicalNodeId;
+                
+                auto blockStart = payload.begin() + i;
+                auto blockEnd = payload.begin() + std::min(i + config.blockSize, payloadSize);
+                auto blockSize = blockEnd - blockStart;
 
-                // TODO : sendBlockData(blockBegin, blockEndIter);
-
-                // record block->node entry
-                blockNodeMap->insert({blockNum, physicalNodeId});
+                Block block(blockNum, blockSize, blockStart, blockEnd);
+                nodeBlockMap[vn->physicalNodeId].push_back(std::move(block));
             }
 
-            // Timing point: after block processing
-            auto t4 = std::chrono::high_resolution_clock::now();
-            std::cout << "After block processing: "
-                      << std::chrono::duration_cast<std::chrono::milliseconds>(t4 - start).count() 
-                      << std::endl;
+            auto blockEnd = std::chrono::high_resolution_clock::now();
+            std::cout << "TIME - block: " 
+                  << std::chrono::duration_cast<std::chrono::milliseconds>(blockEnd - blockStart).count() 
+                  << std::endl;
 
-            return blockNodeMap;
+            return nodeBlockMap;
         })
 
-        // add block->node mapping to KBN
-        .then([&](std::shared_ptr<std::map<int, int>> blockNodeMap) 
+        // send all blocks for given node at once
+        .then([&](std::map<int, std::vector<Block>> nodeBlockMap)
         {
-            // Timing point: before adding to keyBlockNodeMap
-            auto t4 = std::chrono::high_resolution_clock::now();
-            std::cout << "Before adding blockNodeMap: "
-                      << std::chrono::duration_cast<std::chrono::milliseconds>(t4 - start).count() 
-                      << std::endl;
 
-            this->keyBlockNodeMap[key] = blockNodeMap;
+            auto sendStart = std::chrono::high_resolution_clock::now();
 
-            // Timing point: after adding to keyBlockNodeMap
-            auto t5 = std::chrono::high_resolution_clock::now();
-            std::cout << "After adding blockNodeMap: "
-                      << std::chrono::duration_cast<std::chrono::milliseconds>(t5 - start).count() 
-                      << std::endl;
+            for (auto p : nodeBlockMap)
+            {
+                int physicalNodeId = p.first;
+                std::vector<Block> blocks = p.second;
+
+                auto task = sendBlocks(physicalNodeId, blocks, blockNodeMap);
+                blockSendTasks.push_back(task);
+            }
+
+            // wait for 'send' tasks
+            return pplx::when_all(blockSendTasks.begin(), blockSendTasks.end())
+            .then([=]()
+            {
+                auto sendEnd = std::chrono::high_resolution_clock::now();
+                std::cout << "TIME - send & receive: " 
+                  << std::chrono::duration_cast<std::chrono::milliseconds>(sendEnd - sendStart).count() 
+                  << std::endl;
+
+                this->keyBlockNodeMap[key] = blockNodeMap;
+            });
         });
-
+        
         task.wait();
 
         calculateAndShowBlockDistribution();
-
-        // Timing point: after calculating block distribution
-        auto t6 = std::chrono::high_resolution_clock::now();
-        std::cout << "After calculating block distribution: "
-                      << std::chrono::duration_cast<std::chrono::milliseconds>(t6 - start).count() 
-                      << std::endl;
 
         // Timing point: end
         auto end = std::chrono::high_resolution_clock::now();
@@ -370,7 +319,7 @@ public:
             this->getHandler(request);
         });
         listener.support(methods::PUT, [this](http_request request) {
-            this->putHandlerFast(request);
+            this->putHandler(request);
         });
         listener.support(methods::DEL, [this](http_request request) {
             this->deleteHandler(request);

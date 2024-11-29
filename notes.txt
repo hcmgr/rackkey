@@ -8,19 +8,8 @@ PLAN / TODO
 ---------------------------------------
 SCRIBBLES
 ---------------------------------------
-MasterServer.route()
-    if "/store":
-        call StorageHandler.route()
-        StoreHandler:
-            GetHandler    
-            PostHandler
-            DeleteHandler
-
-MasterServer:
-    stores:
-        - consistent hashing data structure
-            - need for PUT, addNode and deleteNode 
-        - KBN map
+Put plan:
+    - send all blocks assigned to that node at once (i.e. in one http req)
 
 Handling duplicates KEYs (i.e. when PUT gives key that's already used):
     - for now, automatically overrides
