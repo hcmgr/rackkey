@@ -23,28 +23,64 @@ using namespace web::http::experimental::listener;
  */
 class Block {
 public:
+    std::string key;
     int blockNum;
-    int size;
-    std::vector<unsigned char>::iterator start;
-    std::vector<unsigned char>::iterator end;
+
+    int dataSize;
+    std::vector<unsigned char>::iterator dataStart;
+    std::vector<unsigned char>::iterator dataEnd;
 
     Block(
+        std::string key,
         int blockNum,
-        int size,
-        std::vector<unsigned char>::iterator start,
-        std::vector<unsigned char>::iterator end
+        int dataSize,
+        std::vector<unsigned char>::iterator dataStart,
+        std::vector<unsigned char>::iterator dataEnd
     ) 
-        : blockNum(blockNum),
-          size(size),
-          start(start),
-          end(end)
+        : key(key),
+          blockNum(blockNum),
+          dataSize(dataSize),
+          dataStart(dataStart),
+          dataEnd(dataEnd)
     {
     }
 
-    void prettyPrintBlock() 
+    /**
+     * Serializes the block into the given byte array
+     */
+    void serialize(std::vector<unsigned char>& buffer)
     {
-        std::cout << "Block: " << blockNum << std::endl;
-        std::cout << "size: " << size << " bytes" << std::endl;
+        // serialize `key`s length, along with its value
+        int keySize = key.size();
+        buffer.insert(buffer.end(), reinterpret_cast<const unsigned char*>(&keySize), 
+                    reinterpret_cast<const unsigned char*>(&keySize) + sizeof(keySize)); // 4 bytes
+        buffer.insert(buffer.end(), key.begin(), key.end()); // variable
+
+        // serialize `blockNum`
+        buffer.insert(buffer.end(), reinterpret_cast<const unsigned char*>(&blockNum), 
+                    reinterpret_cast<const unsigned char*>(&blockNum) + sizeof(blockNum)); // 4 bytes
+
+        // serialize `size`
+        buffer.insert(buffer.end(), reinterpret_cast<const unsigned char*>(&dataSize), 
+                    reinterpret_cast<const unsigned char*>(&dataSize) + sizeof(dataSize)); // 4 bytes
+
+        // Print the data range between `dataStart` and `dataEnd`
+        // std::cout << "Serialised data: ";
+        // for (auto it = this->dataStart; it != this->dataEnd; ++it) 
+        // {
+        //     std::cout << (*it);
+        // }
+        // std::cout << std::endl;
+
+        // serialize the data in the range [start, end)
+        buffer.insert(buffer.end(), this->dataStart, this->dataEnd); // variable
+    }
+
+    void prettyPrint() 
+    {
+        std::cout << "key: " << key << std::endl;
+        std::cout << "block num: " << blockNum << std::endl;
+        std::cout << "size: " << dataSize << " bytes" << std::endl;
     }
 };
 
@@ -163,22 +199,33 @@ public:
         std::shared_ptr<std::map<int, int>> blockNodeMap
     )
     {
-        std::cout << "Sending blocks to node: " << physicalNodeId << std::endl;
-
         std::shared_ptr<PhysicalNode> pn = this->hashRing.getPhysicalNode(physicalNodeId);
 
+        // initialise / retreive client
         if (this->openConnections.find(pn->id) == this->openConnections.end())
             this->openConnections[pn->id] = std::make_shared<http_client>(U(pn->ip));
         http_client& client = *this->openConnections[pn->id];
 
-        // TODO: fill request with data
+        // populate body
+        std::vector<unsigned char> payloadBuffer;
+        for (auto block : blocks)
+        {
+            block.serialize(payloadBuffer);
+        }
 
-        pplx::task<void> task = client.request(methods::GET, U("/"))
+        // build request
+        http_request req = http_request();
+        req.set_method(methods::PUT);
+        req.set_request_uri(U("/"));
+        req.set_body(payloadBuffer);
+
+        std::cout << "Sending: " << blocks.size() << " blocks" << std::endl;
+
+        pplx::task<void> task = client.request(req)
             // send request
             .then([=](http_response response) 
             {
                 if (response.status_code() == status_codes::OK) {
-                    std::cout << "resp received from node: " << physicalNodeId << std::endl;
                     json::value jsonResponse = response.extract_json().get();
                 } else {
                     std::cout << "Request failed with status: " << response.status_code() << std::endl;
@@ -216,6 +263,8 @@ public:
         std::shared_ptr<std::map<int, int>> blockNodeMap = std::make_shared<std::map<int, int>>();
         std::vector<pplx::task<void>> blockSendTasks;
 
+        std::shared_ptr<std::vector<unsigned char>> payloadPtr = std::make_shared<std::vector<unsigned char>>();
+
         pplx::task<void> task = request.extract_vector()
 
         // divide into blocks
@@ -225,8 +274,10 @@ public:
             std::cout << "TIME - extract: " 
                   << std::chrono::duration_cast<std::chrono::milliseconds>(blockStart - start).count() 
                   << std::endl;
+            
+            *payloadPtr = std::move(payload);
                   
-            int payloadSize = payload.size();
+            int payloadSize = payloadPtr->size();
             int blockCnt = 0;
 
             std::map<int, std::vector<Block>> nodeBlockMap;
@@ -239,11 +290,11 @@ public:
                 uint32_t hash = Crypto::sha256_32(hashInput);
                 std::shared_ptr<VirtualNode> vn = this->hashRing.findNextNode(hash);
                 
-                auto blockStart = payload.begin() + i;
-                auto blockEnd = payload.begin() + std::min(i + config.blockSize, payloadSize);
+                auto blockStart = payloadPtr->begin() + i;
+                auto blockEnd = payloadPtr->begin() + std::min(i + config.blockSize, payloadSize);
                 auto blockSize = blockEnd - blockStart;
 
-                Block block(blockNum, blockSize, blockStart, blockEnd);
+                Block block(key, blockNum, blockSize, blockStart, blockEnd);
                 nodeBlockMap[vn->physicalNodeId].push_back(std::move(block));
             }
 
