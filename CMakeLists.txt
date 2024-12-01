@@ -6,15 +6,24 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(cpprestsdk REQUIRED)
 find_package(OpenSSL REQUIRED)
 
+## Shared
+set(SHARED_SRC_DIR "${CMAKE_SOURCE_DIR}/src/shared")
+
 ## Master
 set(MASTER_SRC_DIR "${CMAKE_SOURCE_DIR}/src/master")
 file(GLOB SOURCES
-    "${MASTER_SRC_DIR}/*.cpp")
+    "${MASTER_SRC_DIR}/*.cpp"
+    "${SHARED_SRC_DIR}/*.cpp"
+) 
 add_executable(master ${SOURCES})
 target_link_libraries(master PRIVATE 
     cpprestsdk::cpprest
     OpenSSL::Crypto
 )
-target_include_directories(master PRIVATE ${OPENSSL_INCLUDE_DIR})
+target_include_directories(master PRIVATE 
+    ${OPENSSL_INCLUDE_DIR}
+    ${CMAKE_SOURCE_DIR}/src/shared
+    ${CMAKE_SOURCE_DIR}/src/master
+)
 
 ## Storage

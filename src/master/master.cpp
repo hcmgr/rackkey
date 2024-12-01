@@ -8,91 +8,12 @@
 #include "hash_ring.hpp"
 #include "utils.hpp"
 #include "config.hpp"
+#include "block.hpp"
 
 using namespace web;
 using namespace web::http;
 using namespace web::http::client;
 using namespace web::http::experimental::listener;
-
-/**
- * Represents an I/O block.
- * 
- * NOTE: Block objects only help organise I/O and are NOT kept 
- *       around in memory. i.e. they last the duration of the
- *       GET/PUT request.
- */
-class Block {
-public:
-    std::string key;
-    int blockNum;
-
-    int dataSize;
-    std::vector<unsigned char>::iterator dataStart;
-    std::vector<unsigned char>::iterator dataEnd;
-
-    Block(
-        std::string key,
-        int blockNum,
-        int dataSize,
-        std::vector<unsigned char>::iterator dataStart,
-        std::vector<unsigned char>::iterator dataEnd
-    ) 
-        : key(key),
-          blockNum(blockNum),
-          dataSize(dataSize),
-          dataStart(dataStart),
-          dataEnd(dataEnd)
-    {
-    }
-
-    /**
-     * Serializes the block into the given byte array
-     */
-    void serialize(std::vector<unsigned char>& buffer)
-    {
-        // serialize `key`s length, along with its value
-        int keySize = key.size();
-        buffer.insert(buffer.end(), reinterpret_cast<const unsigned char*>(&keySize), 
-                    reinterpret_cast<const unsigned char*>(&keySize) + sizeof(keySize)); // 4 bytes
-        buffer.insert(buffer.end(), key.begin(), key.end()); // variable
-
-        // serialize `blockNum`
-        buffer.insert(buffer.end(), reinterpret_cast<const unsigned char*>(&blockNum), 
-                    reinterpret_cast<const unsigned char*>(&blockNum) + sizeof(blockNum)); // 4 bytes
-
-        // serialize `size`
-        buffer.insert(buffer.end(), reinterpret_cast<const unsigned char*>(&dataSize), 
-                    reinterpret_cast<const unsigned char*>(&dataSize) + sizeof(dataSize)); // 4 bytes
-
-        // Print the data range between `dataStart` and `dataEnd`
-        // std::cout << "Serialised data: ";
-        // for (auto it = this->dataStart; it != this->dataEnd; ++it) 
-        // {
-        //     std::cout << (*it);
-        // }
-        // std::cout << std::endl;
-
-        // serialize the data in the range [start, end)
-        buffer.insert(buffer.end(), this->dataStart, this->dataEnd); // variable
-    }
-
-    /**
-     * TODO
-     * ----
-     * Deserialize block buffer into vector of Block objects
-     */
-    void deserialize()
-    {
-
-    }
-
-    void prettyPrint() 
-    {
-        std::cout << "key: " << key << std::endl;
-        std::cout << "block num: " << blockNum << std::endl;
-        std::cout << "size: " << dataSize << " bytes" << std::endl;
-    }
-};
 
 class MasterServer 
 {
@@ -368,25 +289,6 @@ public:
     {
     }
 
-    void startServer() {
-        uri_builder uri(this->config.masterServerIPPort);
-        auto addr = uri.to_uri().to_string();
-        http_listener listener(addr);
-
-        listener.support([this](http_request request) {
-            this->router(request);
-        });
-
-        try {
-            listener
-                .open()
-                .then([&addr](){ std::cout << "Server is listening at: " << addr << std::endl; });
-            while (1);
-        } catch (const std::exception& e) {
-            std::cout << "An error occurred: " << e.what() << std::endl;
-        }
-    }
-
     void router(http_request request) {
         auto p = ApiUtils::splitApiPath(request.relative_uri().to_string());
         std::string endpoint = p.first;
@@ -409,7 +311,25 @@ public:
             std::cout << "Endpoint not implemented: " << endpoint << std::endl;
             return;
         }
+    }
 
+    void startServer() {
+        uri_builder uri(this->config.masterServerIPPort);
+        auto addr = uri.to_uri().to_string();
+        http_listener listener(addr);
+
+        listener.support([this](http_request request) {
+            this->router(request);
+        });
+
+        try {
+            listener
+                .open()
+                .then([&addr](){ std::cout << "Server is listening at: " << addr << std::endl; });
+            while (1);
+        } catch (const std::exception& e) {
+            std::cout << "An error occurred: " << e.what() << std::endl;
+        }
     }
 };
 
@@ -418,16 +338,21 @@ public:
 ////////////////////////////////////////////
 
 namespace MasterServerTests {
-    void testCanAddInitialStorageNodes() {
-        std::string configFilePath = "../config.json";
-        MasterServer masterServer = MasterServer(configFilePath);
-        masterServer.hashRing.prettyPrintHashRing();
-    }
 };
 
-int main() 
-{
+
+////////////////////////////////////////////
+// Run
+////////////////////////////////////////////
+
+void run()
+{    
     std::string configFilePath = "../config.json";
     MasterServer masterServer = MasterServer(configFilePath);
     masterServer.startServer();
+}
+
+int main() 
+{
+    run();
 }
