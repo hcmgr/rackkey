@@ -76,6 +76,16 @@ public:
         buffer.insert(buffer.end(), this->dataStart, this->dataEnd); // variable
     }
 
+    /**
+     * TODO
+     * ----
+     * Deserialize block buffer into vector of Block objects
+     */
+    void deserialize()
+    {
+
+    }
+
     void prettyPrint() 
     {
         std::cout << "key: " << key << std::endl;
@@ -250,10 +260,8 @@ public:
      */
     void putHandler(http_request request) 
     {
-        std::cout << "put req received" << std::endl;
-
-        // TODO: extract {KEY} from request
         std::string key = "family_guy.zip";
+        std::cout << request.relative_uri().to_string() << std::endl;
 
         // Timing point: start
         auto start = std::chrono::high_resolution_clock::now();
@@ -311,7 +319,6 @@ public:
         // send all blocks for given node at once
         .then([&](std::map<int, std::vector<Block>> nodeBlockMap)
         {
-
             auto sendStart = std::chrono::high_resolution_clock::now();
 
             for (auto p : nodeBlockMap)
@@ -369,14 +376,18 @@ public:
         auto addr = uri.to_uri().to_string();
         http_listener listener(addr);
 
-        listener.support(methods::GET, [this](http_request request) {
-            this->getHandler(request);
-        });
-        listener.support(methods::PUT, [this](http_request request) {
-            this->putHandler(request);
-        });
-        listener.support(methods::DEL, [this](http_request request) {
-            this->deleteHandler(request);
+        // listener.support(methods::GET, [this](http_request request) {
+        //     this->getHandler(request);
+        // });
+        // listener.support(methods::PUT, [this](http_request request) {
+        //     this->putHandler(request);
+        // });
+        // listener.support(methods::DEL, [this](http_request request) {
+        //     this->deleteHandler(request);
+        // });
+
+        listener.support([this](http_request request) {
+            this->router(request);
         });
 
         try {
@@ -389,7 +400,24 @@ public:
         }
     }
 
-    void router() {
+    void router(http_request request) {
+        std::string relPath = request.relative_uri().to_string();
+
+        if (relPath == U("/store"))
+        {
+            if (request.method() == methods::GET)
+                this->getHandler(request);
+            if (request.method() == methods::PUT)
+                this->putHandler(request);
+            if (request.method() == methods::DEL)
+                this->deleteHandler(request);
+        }
+
+        else 
+        {
+            std::cout << "Endpoint not implemented: " << relPath << std::endl;
+            return;
+        }
 
     }
 };
