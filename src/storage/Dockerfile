@@ -1,16 +1,24 @@
-FROM python:3.9-slim
+# Use a base image that can run C++ applications, e.g., Ubuntu
+FROM ubuntu:20.04
 
-# Set the working directory inside container
+# Install dependencies for running the executable
+RUN apt-get update && apt-get install -y \
+    libssl-dev \
+    libcpprest-dev \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set the working directory in the container
 WORKDIR /app
 
-# Install dependencies
-COPY requirements.txt /app
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy the pre-compiled executable and necessary libraries into the container
+COPY ./build/storage_node /app/
 
-# Get code
-COPY storage_test_server.py /app
+# If your executable depends on other libraries, you need to copy them as well
+# For example:
+# COPY ./path/to/dependencies /path/in/container
 
-## NOTE: docker compose exposes our ports for us
+# Run the executable
+CMD ["./storage_node"]
 
-# Run
-CMD ["python3", "storage_test_server.py"]
+

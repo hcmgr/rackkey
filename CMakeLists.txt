@@ -27,3 +27,18 @@ target_include_directories(master PRIVATE
 )
 
 ## Storage
+set(STORAGE_SRC_DIR "${CMAKE_SOURCE_DIR}/src/storage")
+file(GLOB SOURCES
+    "${STORAGE_SRC_DIR}/*.cpp"
+    "${SHARED_SRC_DIR}/*.cpp"
+) 
+add_executable(storage ${SOURCES})
+target_link_libraries(storage PRIVATE 
+    cpprestsdk::cpprest
+    OpenSSL::Crypto
+)
+target_include_directories(storage PRIVATE 
+    ${OPENSSL_INCLUDE_DIR}
+    ${CMAKE_SOURCE_DIR}/src/storage
+    ${CMAKE_SOURCE_DIR}/src/shared
+)

@@ -72,7 +72,8 @@ public:
      * Calculates and displays the blocks distribution
      * across the storage nodes.
      */
-    void calculateAndShowBlockDistribution() {
+    void calculateAndShowBlockDistribution() 
+    {
         std::map<int, int> nodeBlockCounts;
 
         for (auto p : this->keyBlockNodeMap) 
@@ -313,7 +314,8 @@ public:
         }
     }
 
-    void startServer() {
+    void startServer() 
+    {
         uri_builder uri(this->config.masterServerIPPort);
         auto addr = uri.to_uri().to_string();
         http_listener listener(addr);
