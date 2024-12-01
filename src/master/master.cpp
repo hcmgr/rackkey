@@ -177,7 +177,7 @@ public:
      * Given: (KEY)
      * Requests all blocks for the given KEY from the storage cluster, returns in order
      */
-    void getHandler(http_request request) 
+    void getHandler(http_request request, const std::string key) 
     {
         std::cout << "get req received" << std::endl;
 
@@ -258,11 +258,8 @@ public:
      * Given: (KEY, payload)
      * Breaks payload into blocks and distributes them across the storage cluster
      */
-    void putHandler(http_request request) 
+    void putHandler(http_request request, const std::string key) 
     {
-        std::string key = "family_guy.zip";
-        std::cout << request.relative_uri().to_string() << std::endl;
-
         // Timing point: start
         auto start = std::chrono::high_resolution_clock::now();
             
@@ -367,7 +364,7 @@ public:
      * Given: (KEY)
      * Deletes all blocks of the given KEY from the storage cluster
      */
-    void deleteHandler(http_request request) 
+    void deleteHandler(http_request request, const std::string key) 
     {
     }
 
@@ -375,16 +372,6 @@ public:
         uri_builder uri(this->config.masterServerIPPort);
         auto addr = uri.to_uri().to_string();
         http_listener listener(addr);
-
-        // listener.support(methods::GET, [this](http_request request) {
-        //     this->getHandler(request);
-        // });
-        // listener.support(methods::PUT, [this](http_request request) {
-        //     this->putHandler(request);
-        // });
-        // listener.support(methods::DEL, [this](http_request request) {
-        //     this->deleteHandler(request);
-        // });
 
         listener.support([this](http_request request) {
             this->router(request);
@@ -401,21 +388,25 @@ public:
     }
 
     void router(http_request request) {
-        std::string relPath = request.relative_uri().to_string();
+        auto p = ApiUtils::splitApiPath(request.relative_uri().to_string());
+        std::string endpoint = p.first;
+        std::string key = p.second;
 
-        if (relPath == U("/store"))
+        std::cout << key << std::endl;
+
+        if (endpoint == U("/store"))
         {
             if (request.method() == methods::GET)
-                this->getHandler(request);
+                this->getHandler(request, key);
             if (request.method() == methods::PUT)
-                this->putHandler(request);
+                this->putHandler(request, key);
             if (request.method() == methods::DEL)
-                this->deleteHandler(request);
+                this->deleteHandler(request, key);
         }
 
         else 
         {
-            std::cout << "Endpoint not implemented: " << relPath << std::endl;
+            std::cout << "Endpoint not implemented: " << endpoint << std::endl;
             return;
         }
 

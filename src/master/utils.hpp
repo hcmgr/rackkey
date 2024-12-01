@@ -11,6 +11,17 @@ using namespace web::http::experimental::listener;
 
 namespace ApiUtils {
     json::value createPlaceholderJson();
+
+    /**
+     * Splits the api path into a prefix and final parameter.
+     * 
+     * E.g.
+     * "/api/store/archive.zip" - returns {"/api/store", "archive.zip"}
+     * 
+     * E.g.
+     * "/add/node1" - returns {"/add", "node1"}
+     */
+    std::pair<std::string, std::string> splitApiPath(const std::string& relPath);
 };
     
 namespace PrintUtils {
