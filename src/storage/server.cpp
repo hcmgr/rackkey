@@ -5,6 +5,8 @@
 #include <string>
 #include <iostream>
 
+#include "utils.hpp"
+
 using namespace web;
 using namespace web::http;
 using namespace web::http::client;
@@ -22,12 +24,12 @@ void getHandler(http_request request)
 
 void startServer() 
 {
-    uri_builder uri("http://192.168.0.24:8081");
+    uri_builder uri("http://localhost:8081");
     auto addr = uri.to_uri().to_string();
     http_listener listener(addr);
 
     listener.support([](http_request request) {
-        getHandler()
+        getHandler(request);
     });
 
     try {

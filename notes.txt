@@ -1,7 +1,6 @@
 ---------------------------------------
 PLAN / TODO
 ---------------------------------------
-- clean up PUT
 - re-write current python server in cpprest c++
 - try just returning blocks in order
     - i.e. blocks in order is what storage should return anyway

@@ -123,7 +123,10 @@ public:
     }
 
     /**
-     * Send block to designated storage node
+     * Sends the given list of blocks to the given physical node.
+     * 
+     * All blocks are sent in a single PUT request to the given 
+     * physical node.
      */
     pplx::task<void> sendBlocks(
         int physicalNodeId,
@@ -178,7 +181,7 @@ public:
      * PUT
      * ---
      * Given: (KEY, payload)
-     * Breaks payload into blocks and distributes them across the storage cluster
+     * Breaks payload into blocks and distributes them across the storage cluster.
      */
     void putHandler(http_request request, const std::string key) 
     {
