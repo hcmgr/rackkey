@@ -1,1 +1,1 @@
-curl -X GET localhost:9000
+curl -X GET localhost:9000/store/archive.zip

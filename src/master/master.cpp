@@ -101,10 +101,10 @@ public:
      */
     void getHandler(http_request request, const std::string key) 
     {
-        std::cout << "get req received" << std::endl;
+        std::cout << "GET req received: " << key << std::endl;
 
         // Create HTTP client
-        http_client client(U("http://192.168.0.24:8082"));
+        http_client client(U("http://localhost:8081"));
 
         // Send a GET request
         client.request(methods::GET, U("/"))

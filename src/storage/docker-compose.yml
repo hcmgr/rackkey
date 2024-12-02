@@ -1,11 +1,10 @@
-version: '3.8'
 services:
-
   ##########################
   storage-node-0:
-    image: example-server  
+    image: storage-server
     build:
-      context: . 
+      context: ../../  # project root directory
+      dockerfile: src/storage/Dockerfile
     ports:
       - "8081:8080"  
     environment:
@@ -15,9 +14,10 @@ services:
     container_name: Node_0
 
   storage-node-1:
-    image: example-server
+    image: storage-server
     build:
-      context: .
+      context: ../../  # project root directory
+      dockerfile: src/storage/Dockerfile 
     ports:
       - "8082:8080" 
     environment:
@@ -27,9 +27,10 @@ services:
     container_name: Node_1
 
   storage-node-2:
-    image: example-server
+    image: storage-server
     build:
-      context: .
+      context: ../../  # project root directory
+      dockerfile: src/storage/Dockerfile
     ports:
       - "8083:8080"  
     environment:

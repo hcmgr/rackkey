@@ -4,6 +4,7 @@
 
 #include <string>
 #include <iostream>
+#include <cstdlib>
 
 #include "utils.hpp"
 
@@ -14,6 +15,9 @@ using namespace web::http::experimental::listener;
 
 void getHandler(http_request request)
 {
+    const char* nodeId = std::getenv("NODE_ID");
+    std::cout << "Node " << nodeId << " received GET request" << std::endl;
+
     // send response
     json::value responseJson = ApiUtils::createPlaceholderJson();
     http_response response(status_codes::OK);
@@ -24,7 +28,7 @@ void getHandler(http_request request)
 
 void startServer() 
 {
-    uri_builder uri("http://localhost:8081");
+    uri_builder uri("http://localhost:8080");
     auto addr = uri.to_uri().to_string();
     http_listener listener(addr);
 
