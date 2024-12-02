@@ -1,5 +1,5 @@
 # Use a base image that can run C++ applications, e.g., Ubuntu
-FROM ubuntu:24.10
+FROM arm64v8/ubuntu
 
 ENV DEBIAN_FRONTEND=noninteractive
 

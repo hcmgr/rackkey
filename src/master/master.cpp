@@ -106,7 +106,7 @@ public:
         // Create HTTP client
         http_client client(U("http://localhost:8081"));
 
-        // Send a GET request
+        // Send GET to storage node
         client.request(methods::GET, U("/"))
             .then([&](http_response response) {
                 if (response.status_code() == status_codes::OK) {
@@ -118,6 +118,9 @@ public:
                 }
             })
             .wait();
+        
+        // Reply to the client
+        request.reply(200);
 
         return;
     }
@@ -298,8 +301,6 @@ public:
         std::string endpoint = p.first;
         std::string key = p.second;
 
-        std::cout << key << std::endl;
-
         if (endpoint == U("/store"))
         {
             if (request.method() == methods::GET)
@@ -330,7 +331,7 @@ public:
         try {
             listener
                 .open()
-                .then([&addr](){ std::cout << "Server is listening at: " << addr << std::endl; });
+                .then([&addr](){ std::cout << "Master server is listening at: " << addr << std::endl; });
             while (1);
         } catch (const std::exception& e) {
             std::cout << "An error occurred: " << e.what() << std::endl;

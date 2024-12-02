@@ -1,11 +1,11 @@
 ---------------------------------------
 PLAN / TODO
 ---------------------------------------
-- re-write current python server in cpprest c++
 - try just returning blocks in order
     - i.e. blocks in order is what storage should return anyway
 - try re-assembling blocks to produce the file
 - do it on a zip file and see if its unharmed
+- compile and run the storage server using docker - right now, just deploy one server
 
 ---------------------------------------
 SCRIBBLES

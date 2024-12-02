@@ -1,9 +1,7 @@
 {
     "masterServerIPPort": "http://localhost:9000",
     "storageNodeIPs": [
-        "http://192.168.0.24:8081",
-        "http://192.168.0.24:8082",
-        "http://192.168.0.24:8083"
+        "http://localhost:8081"
     ],
     "numVirtualNodes": 50,
     "blockSize": 4096

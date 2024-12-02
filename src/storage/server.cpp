@@ -15,9 +15,7 @@ using namespace web::http::experimental::listener;
 
 void getHandler(http_request request)
 {
-    const char* nodeId = std::getenv("NODE_ID");
-    std::cout << "Node " << nodeId << " received GET request" << std::endl;
-
+    std::cout << "GET req received" << std::endl;
     // send response
     json::value responseJson = ApiUtils::createPlaceholderJson();
     http_response response(status_codes::OK);
@@ -28,7 +26,7 @@ void getHandler(http_request request)
 
 void startServer() 
 {
-    uri_builder uri("http://localhost:8080");
+    uri_builder uri("http://localhost:8081");
     auto addr = uri.to_uri().to_string();
     http_listener listener(addr);
 
@@ -39,7 +37,7 @@ void startServer()
     try {
         listener
             .open()
-            .then([&addr](){ std::cout << "Server is listening at: " << addr << std::endl; });
+            .then([&addr](){ std::cout << "Storage server is listening at: " << addr << std::endl; });
         while (1);
     } catch (const std::exception& e) {
         std::cout << "An error occurred: " << e.what() << std::endl;
