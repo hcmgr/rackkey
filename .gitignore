@@ -1,4 +1,7 @@
 .vscode
+in/*.csv
+in/*.zip
+in/shakespeare.txt
 out
 build
 *.out
