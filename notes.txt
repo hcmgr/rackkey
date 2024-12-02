@@ -6,6 +6,7 @@ PLAN / TODO
 - try re-assembling blocks to produce the file
 - do it on a zip file and see if its unharmed
 - compile and run the storage server using docker - right now, just deploy one server
+- MAYBE: make MasterServer and StorageServer inherit from a more general HttpServer
 
 ---------------------------------------
 SCRIBBLES

@@ -10,7 +10,11 @@ using namespace web::http;
 using namespace web::http::experimental::listener;
 
 namespace ApiUtils {
-    json::value createPlaceholderJson();
+
+    /**
+     * Creates a json response object with a single http status field
+     */
+    json::value statusResponse(status_code code);
 
     /**
      * Splits the api path into a prefix and final parameter.

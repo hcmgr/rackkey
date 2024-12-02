@@ -32,20 +32,23 @@ Block::Block(
  * 
  * On showData == true, block data is also printed.
  */
-void Block::prettyPrint(bool showData = false) 
+void Block::prettyPrint(bool showData) 
 {
+    std::cout << "####################" << std::endl;
     std::cout << "key: " << key << std::endl;
     std::cout << "block num: " << blockNum << std::endl;
     std::cout << "size: " << dataSize << " bytes" << std::endl;
     if (showData)
     {
-        std::cout << "Data: ";
+        std::cout << "Data: " << std::endl;
         for (auto it = dataStart; it != dataEnd; it++)
         {
-            std::cout << static_cast<int>(*it) << " ";
+            // NOTE: display as 'char' for now, though 'int' may be more appropriate in general
+            std::cout << static_cast<char>(*it);
         }
         std::cout << std::endl;
     }
+    std::cout << "####################" << std::endl << std::endl;
 }
 
 /**

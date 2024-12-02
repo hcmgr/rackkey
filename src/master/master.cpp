@@ -94,6 +94,47 @@ public:
     }
 
     /**
+     * Retreives all blocks from given physical node
+     */
+    pplx::task<void> getBlocks(
+        int physicalNodeId,
+        std::string key,
+        std::vector<int> blockNums
+    )
+    {
+        std::shared_ptr<PhysicalNode> pn = this->hashRing.getPhysicalNode(physicalNodeId);
+
+        // initialise / retreive client
+        if (this->openConnections.find(pn->id) == this->openConnections.end())
+            this->openConnections[pn->id] = std::make_shared<http_client>(U(pn->ip));
+        http_client& client = *this->openConnections[pn->id];
+
+        // build request
+        http_request req = http_request();
+        req.set_method(methods::GET);
+        req.set_request_uri(U("/" + key));
+        // TODO: set body to blockNums encoded as unsigned chars
+
+        std::shared_ptr<std::vector<unsigned char>> payloadPtr = std::make_shared<std::vector<unsigned char>>();
+
+        pplx::task<void> task = client.request(req)
+        .then([=](http_response response)
+        {
+            return response.extract_vector();
+        })
+        .then([=](std::vector<unsigned char> payload)
+        {
+            *payloadPtr = payload;
+            std::vector<Block> blocks = Block::deserialize(*(payloadPtr));
+            for (auto block : blocks)
+            {
+                block.prettyPrint(false);
+            }
+        });
+        return task;
+    }
+
+    /**
      * GET
      * ---
      * Given: (KEY)
@@ -103,25 +144,39 @@ public:
     {
         std::cout << "GET req received: " << key << std::endl;
 
-        // Create HTTP client
-        http_client client(U("http://localhost:8081"));
+        std::shared_ptr<std::map<int, int>> blockNodeMap = this->keyBlockNodeMap[key];
+        std::vector<pplx::task<void>> getBlockTasks;
 
-        // Send GET to storage node
-        client.request(methods::GET, U("/"))
-            .then([&](http_response response) {
-                if (response.status_code() == status_codes::OK) {
-                    // Parse the response body as JSON
-                    json::value jsonResponse = response.extract_json().get();
-                    std::cout << jsonResponse << std::endl;
-                } else {
-                    std::cout << "Request failed with status: " << response.status_code() << std::endl;
-                }
-            })
-            .wait();
-        
-        // Reply to the client
-        request.reply(200);
+        // build up node->block map
+        std::map<int, std::vector<int>> nodeBlockMap;
+        for (auto p : *(blockNodeMap))        
+        {
+            int blockNum = p.first;
+            int nodeId = p.second;
+            nodeBlockMap[nodeId].push_back(blockNum);
+        }
 
+        // call 'getBlocks' for each node, sending block nums as payload
+        for (auto p : nodeBlockMap)
+        {
+            int nodeId = p.first;
+            std::vector<int> blockNums = p.second;
+            auto task = getBlocks(nodeId, key, blockNums);
+            getBlockTasks.push_back(task);
+        }
+
+        pplx::when_all(getBlockTasks.begin(), getBlockTasks.end())
+        .then([=](){
+            std::cout << "GETs: Finished" << std::endl;
+        });
+
+        // recombine
+
+        // send response
+        http_response response(status_codes::OK);
+        json::value responseBody = ApiUtils::statusResponse(status_codes::OK);
+        response.set_body(responseBody);
+        request.reply(response);
         return;
     }
 
@@ -133,6 +188,7 @@ public:
      */
     pplx::task<void> sendBlocks(
         int physicalNodeId,
+        std::string key,
         std::vector<Block> &blocks,
         std::shared_ptr<std::map<int, int>> blockNodeMap
     )
@@ -143,7 +199,7 @@ public:
         if (this->openConnections.find(pn->id) == this->openConnections.end())
             this->openConnections[pn->id] = std::make_shared<http_client>(U(pn->ip));
         http_client& client = *this->openConnections[pn->id];
-
+        
         // populate body
         std::vector<unsigned char> payloadBuffer;
         for (auto block : blocks)
@@ -154,8 +210,10 @@ public:
         // build request
         http_request req = http_request();
         req.set_method(methods::PUT);
-        req.set_request_uri(U("/"));
+        req.set_request_uri(U("/" + key));
         req.set_body(payloadBuffer);
+
+        std::cout << "sending to: " << req.absolute_uri().to_string() << std::endl;
 
         pplx::task<void> task = client.request(req)
             // send request
@@ -192,7 +250,7 @@ public:
         auto start = std::chrono::high_resolution_clock::now();
             
         std::shared_ptr<std::map<int, int>> blockNodeMap = std::make_shared<std::map<int, int>>();
-        std::vector<pplx::task<void>> blockSendTasks;
+        std::vector<pplx::task<void>> sendBlockTasks;
 
         std::shared_ptr<std::vector<unsigned char>> payloadPtr = std::make_shared<std::vector<unsigned char>>();
 
@@ -230,7 +288,7 @@ public:
                 nodeBlockMap[vn->physicalNodeId].push_back(std::move(block));
             }
 
-            std::cout << "Total blocks: " << blockCnt << std::endl;
+            std::cout << "Num. of blocks: " << blockCnt << std::endl;
 
             auto blockEnd = std::chrono::high_resolution_clock::now();
             std::cout << "TIME - block: " 
@@ -251,12 +309,12 @@ public:
                 int physicalNodeId = p.first;
                 std::vector<Block> blocks = p.second;
 
-                auto task = sendBlocks(physicalNodeId, blocks, blockNodeMap);
-                blockSendTasks.push_back(task);
+                auto task = sendBlocks(physicalNodeId, key, blocks, blockNodeMap);
+                sendBlockTasks.push_back(task);
             }
 
             // wait for 'send' tasks
-            return pplx::when_all(blockSendTasks.begin(), blockSendTasks.end())
+            return pplx::when_all(sendBlockTasks.begin(), sendBlockTasks.end())
             .then([=]()
             {
                 auto sendEnd = std::chrono::high_resolution_clock::now();
@@ -279,10 +337,11 @@ public:
         std::cout << "Total Time: " << duration.count() << " ms" << std::endl;
 
         // send response
-        json::value responseJson = ApiUtils::createPlaceholderJson();
         http_response response(status_codes::OK);
-        response.set_body(responseJson);
+        json::value responseBody = ApiUtils::statusResponse(status_codes::OK);
+        response.set_body(responseBody);
         request.reply(response);
+        return;
     }
 
 
@@ -301,7 +360,7 @@ public:
         std::string endpoint = p.first;
         std::string key = p.second;
 
-        if (endpoint == U("/store"))
+        if (endpoint == U("/store/"))
         {
             if (request.method() == methods::GET)
                 this->getHandler(request, key);
