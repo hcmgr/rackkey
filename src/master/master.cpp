@@ -99,7 +99,8 @@ public:
     pplx::task<void> getBlocks(
         int physicalNodeId,
         std::string key,
-        std::vector<int> blockNums
+        std::vector<int> blockNums,
+        std::shared_ptr<std::map<int, Block>> blockMap
     )
     {
         std::shared_ptr<PhysicalNode> pn = this->hashRing.getPhysicalNode(physicalNodeId);
@@ -115,9 +116,9 @@ public:
         req.set_request_uri(U("/" + key));
         // TODO: set body to blockNums encoded as unsigned chars
 
-        std::shared_ptr<std::vector<unsigned char>> payloadPtr = std::make_shared<std::vector<unsigned char>>();
+        auto payloadPtr = std::make_shared<std::vector<unsigned char>>();
 
-        pplx::task<void> task = client.request(req)
+        return client.request(req)
         .then([=](http_response response)
         {
             return response.extract_vector();
@@ -128,10 +129,9 @@ public:
             std::vector<Block> blocks = Block::deserialize(*(payloadPtr));
             for (auto block : blocks)
             {
-                block.prettyPrint(false);
+                blockMap->insert({block.blockNum, std::move(block)});
             }
         });
-        return task;
     }
 
     /**
@@ -145,8 +145,7 @@ public:
         std::cout << "GET req received: " << key << std::endl;
 
         std::shared_ptr<std::map<int, int>> blockNodeMap = this->keyBlockNodeMap[key];
-        std::vector<pplx::task<void>> getBlockTasks;
-
+        
         // build up node->block map
         std::map<int, std::vector<int>> nodeBlockMap;
         for (auto p : *(blockNodeMap))        
@@ -156,26 +155,40 @@ public:
             nodeBlockMap[nodeId].push_back(blockNum);
         }
 
+        auto blockMap = std::make_shared<std::map<int, Block>>();
+        
         // call 'getBlocks' for each node, sending block nums as payload
+        std::vector<pplx::task<void>> getBlockTasks;
         for (auto p : nodeBlockMap)
         {
             int nodeId = p.first;
             std::vector<int> blockNums = p.second;
-            auto task = getBlocks(nodeId, key, blockNums);
+
+            auto task = getBlocks(nodeId, key, blockNums, blockMap);
             getBlockTasks.push_back(task);
         }
 
-        pplx::when_all(getBlockTasks.begin(), getBlockTasks.end())
-        .then([=](){
+        auto task = pplx::when_all(getBlockTasks.begin(), getBlockTasks.end())
+        .then([=]()
+        {
             std::cout << "GETs: Finished" << std::endl;
         });
 
+        task.wait();
+
         // recombine
+        std::vector<unsigned char> payloadBuffer;
+        for (auto p : *(blockMap))
+        {
+            int blockNum = p.first;
+            Block block = p.second;
+
+            payloadBuffer.insert(payloadBuffer.end(), block.dataStart, block.dataEnd);
+        }
 
         // send response
         http_response response(status_codes::OK);
-        json::value responseBody = ApiUtils::statusResponse(status_codes::OK);
-        response.set_body(responseBody);
+        response.set_body(payloadBuffer);
         request.reply(response);
         return;
     }
