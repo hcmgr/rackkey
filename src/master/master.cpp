@@ -357,6 +357,27 @@ public:
         return;
     }
 
+    // /**
+    //  * Send payload immediately back to them
+    //  */
+    // void putHandlerSimpleTest(http_request request, const std::string key)
+    // {
+
+    //     auto payloadPtr = std::make_shared<std::vector<unsigned char>>();
+    //     pplx::task<void> task = request.extract_vector()
+    //     .then([=](std::vector<unsigned char> payload)
+    //     {
+    //         *payloadPtr = payload;
+    //     });
+
+    //     task.wait();
+
+    //     http_response response = http_response(status_codes::OK);
+    //     // response.headers().add(U("Content-Type"), U("application/octet-stream"));
+    //     response.set_body(*(payloadPtr));
+    //     request.reply(response);
+    //     return;
+    // }
 
     /**
      * DELETE
