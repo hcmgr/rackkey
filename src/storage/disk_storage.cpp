@@ -54,7 +54,7 @@ struct __attribute__((packed)) Header
 };
 
 /**
- * Represents an entry in the BAT (see below).
+ * Represents an entry in the BAT.
  */
 struct __attribute__((packed)) BATEntry
 {
@@ -143,7 +143,7 @@ private:
     std::fstream storeFile;
 
     /**
-     * Returns true if store directory and file validly exists, false otherwise
+     * Returns true if the store directory and store file validly exist, false otherwise
      */
     bool storeFileExists()
     {
@@ -207,10 +207,17 @@ private:
     void initialiseHeader()
     {
         uint32_t batOffset = sizeof(Header);
-        uint32_t numBlocks = ceil(maxDataSize / blockSize);
+        uint32_t numBlocks = ceil(this->maxDataSize / this->blockSize);
         uint32_t batSize = sizeof(uint32_t) + (numBlocks * sizeof(BATEntry));
 
-        this->header = Header(magicNumber, blockSize, maxDataSize, batOffset, batSize);
+        this->header = Header(
+            this->magicNumber, 
+            this->blockSize, 
+            this->maxDataSize, 
+            batOffset, 
+            batSize
+        );
+
         writeHeader();
     }
 
@@ -476,7 +483,7 @@ public:
     uint32_t blockCapacity;
 
     /**
-     * Use a bitmap
+     * Bitmap data structure used
      */
     std::vector<uint8_t> bitMap;
 
@@ -491,32 +498,49 @@ public:
     }
 
     /**
-     * Returns true if the given block is mapped, false if its free
-     */
-    bool isMapped(uint32_t blockNum)
-    {
-        int index = blockNum / 8;
-        if (index >= bitMap.size())
-            throw std::runtime_error("Block number not mapped: " + std::to_string(blockNum));
-
-        int pos = blockNum % 8;
-        return bitMap[index] >> pos & 0x01;
-    }
-
-    /**
-     * Finds and allocates a contiguous chunk of `N` free blocks.
+     * TODO:
+     * 
+     * Finds `N` contiguous free blocks and allocates them.
      * 
      * Returns the starting block number.
      */
     std::optional<uint32_t> allocateNBlocks(uint32_t N)
     {
-        // TODO: find `N` contiguous free blocks
-        // just have to iterate every pos
-        // when find alloc'd, can just jump forward to 1 past this point
-        // can quickly check 8-block chunks
+        if (N < 1)
+            return std::nullopt;
 
-        // TODO: allocate `N` blocks, starting from startBlockNum
-        return std::nullopt;
+        // find contiguous section of `N` free blocks
+        auto alloc = findNFreeBlocks(N);
+        if (alloc == std::nullopt) 
+            return std::nullopt;
+
+        uint32_t startBlockNum = *alloc;
+        std::cout << "Starting block: " << startBlockNum << std::endl;
+
+        uint32_t index = startBlockNum / 8; // byte index
+        uint32_t pos = startBlockNum % 8;   // position in byte
+
+        // allocate any un-aligned blocks at the beginning
+        if (pos != 0)
+        {
+            uint32_t numBits = std::min(N, 8 - pos);
+            allocateBitsInByte(index, pos, numBits);
+            N -= numBits;
+            index++;
+        }
+
+        // allocate aligned blocks
+        while (N >= 8)
+        {
+            bitMap[index++] = 0xFF;
+            N -= 8;
+        }
+
+        // allocate any un-aligned blocks at the end
+        if (N > 0)
+            allocateBitsInByte(index, 0, N);
+
+        return startBlockNum;
     }
 
     /**
@@ -527,15 +551,15 @@ public:
         if (N < 1)
             return;
 
-        uint32_t index = startBlockNum / 8;  // byte index
-        uint32_t pos = startBlockNum % 8; // position in byte
+        uint32_t index = startBlockNum / 8; // byte index
+        uint32_t pos = startBlockNum % 8;   // position in byte
 
         // free any un-aligned blocks at the beginning
         if (pos != 0)
         {
-            uint32_t bitsToFree = std::min(N, 8 - pos);
-            freeBitsInByte(index, pos, bitsToFree);
-            N -= bitsToFree;
+            uint32_t numBits = std::min(N, 8 - pos);
+            freeBitsInByte(index, pos, numBits);
+            N -= numBits;
             index++;
         }
 
@@ -579,13 +603,90 @@ public:
     }
 
 private:
+
     /**
-     * Frees `count` bits starting at `startPos` of byte with index `index`
+     * TODO:
+     * 
+     * Finds `N` contiguous free blocks and returns the 
+     * starting block number.
+     */
+    std::optional<uint32_t> findNFreeBlocks(uint32_t N)
+    {
+        uint32_t index = 0;   // index of current entry in bitmap
+        uint32_t pos = 0;     // bit position
+
+        uint32_t currStartBlock = 0; 
+        uint32_t contiguousCount = 0;
+
+        while (index < this->bitMap.size())
+        {
+            uint8_t currEntry = bitMap[index];
+
+            for (; pos < 8; pos++)
+            {
+                // block is free
+                if ((currEntry & (1 << pos)) == 0)
+                {
+                    if (contiguousCount == 0)
+                    {
+                        // mark start of new contiguous section
+                        currStartBlock = index * 8 + pos;
+                    }
+                    contiguousCount++;
+
+                    // found contiguous section
+                    if (contiguousCount == N)
+                    {
+                        return currStartBlock;
+                    }
+                }
+
+                // block is allocated
+                else
+                {
+                    contiguousCount = 0;
+                }
+            }
+
+            // move to next entry
+            index++;
+            pos = 0;
+        }
+
+        // no contiguous section found
+        std::cout << "No contiguous section of " << N << " blocks available" << std::endl;
+        return std::nullopt;
+    }
+
+    /**
+     * Allocates `count` bits of byte with index `index`, starting at `startPos`
+     */
+    void allocateBitsInByte(uint32_t index, uint32_t startPos, uint32_t count)
+    {
+        uint32_t mask = ((1 << count) - 1) << startPos; // 1's in positions to be allocated
+        bitMap[index] |= mask;
+    }
+
+    /**
+     * Frees `count` bits of byte with index `index`, starting at `startPos`
      */
     void freeBitsInByte(uint32_t index, uint32_t startPos, uint32_t count)
     {
         uint32_t mask = ((1 << count) - 1) << startPos;  // 1's in positions to be free'd
         bitMap[index] &= ~mask; 
+    }
+
+    /**
+     * Returns true if the given block is mapped, false if its free
+     */
+    bool isMapped(uint32_t blockNum)
+    {
+        int index = blockNum / 8;
+        if (index >= bitMap.size())
+            throw std::runtime_error("Block number not mapped: " + std::to_string(blockNum));
+
+        int pos = blockNum % 8;
+        return bitMap[index] >> pos & 0x01;
     }
 };
 
@@ -647,26 +748,73 @@ namespace FreeSpaceMapTests
         fsm.bitMap[2] = 0xFF; // 8 blocks
         fsm.bitMap[3] = 0x03; // 2 blocks
 
-        std::cout << fsm.toString(false);
+        std::cout << fsm.toString(true);
 
         // free `N` blocks starting at `startingBlockNum`
         uint32_t startingBlockNum = 14;
         uint32_t N = 12;
         fsm.freeNBlocks(startingBlockNum, N);
 
-        std::cout << fsm.toString(false);
+        std::cout << fsm.toString(true);
     }
 
     void testAllocateNBlocks()
     {
+        int blockCapacity = 32;
+        FreeSpaceMap fsm(blockCapacity);
+        uint32_t N = 10;
 
+        // allocate some troublesome blocks
+        fsm.bitMap[0] = 0x7F; // 0111 1111
+        fsm.bitMap[1] = 0x00; // 0000 0000
+        fsm.bitMap[2] = 0x01; // 0000 0001
+        fsm.bitMap[3] = 0x00; // 0000 0000
+        
+        fsm.allocateNBlocks(N);
+        std::cout << fsm.toString(true);
+    }
+
+    void testAllocateThenFree()
+    {
+        int blockCapacity = 32;
+        FreeSpaceMap fsm(blockCapacity);
+
+        // pre-allocate some blocks
+        fsm.bitMap[0] = 0x7F;
+        std::cout << fsm.toString(true);
+
+        // allocate N blocks - should start at block 7
+        uint32_t N = 10;
+        fsm.allocateNBlocks(N);
+        std::cout << fsm.toString(true);
+
+        // free those N blocks
+        uint32_t startBlockNum = 7;
+        fsm.freeNBlocks(7, N);
+        std::cout << fsm.toString(true);
     }
 }
+
+/*
+Immediate todo:
+    - freeSpaceMap.allocateNBlocks()
+    - rename DiskStorage to StoreFile
+    - diskStorage.writeBlocks()
+    - diskStorage.getBlocks()
+    - have a go at using it to save blocks and retreive them
+    - handle hash collisions:
+        - heh?
+    - probably pre-allocate the whole file at the start
+        - write byte to last position (some EOF byte or something)
+        - i.e. at maxDataSize + 1 position
+*/
 
 int main()
 {
     // DiskStorageTests::testCanWriteNewHeaderAndBat();
     // DiskStorageTests::testCanReadExistingHeaderAndBat();
 
-    FreeSpaceMapTests::testFreeNBlocks();
+    // FreeSpaceMapTests::testFreeNBlocks();
+    // FreeSpaceMapTests::testAllocateNBlocks();
+    // FreeSpaceMapTests::testAllocateThenFree();
 }
