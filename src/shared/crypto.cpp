@@ -1,6 +1,8 @@
 #include <openssl/sha.h>
 #include <string>
 
+#include "crypto.hpp"
+
 namespace Crypto {
 
     #pragma GCC diagnostic ignored "-Wdeprecated-declarations"

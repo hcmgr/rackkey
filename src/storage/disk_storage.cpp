@@ -2,6 +2,7 @@
 
 #include "utils.hpp"
 #include "block.hpp"
+#include "crypto.hpp"
 
 namespace fs = std::filesystem;
 
@@ -141,6 +142,9 @@ private:
     fs::path storeFilePath;
     std::fstream storeFile;
 
+    /**
+     * Returns true if store directory and file validly exists, false otherwise
+     */
     bool storeFileExists()
     {
         // check store directory exists
@@ -159,6 +163,9 @@ private:
         return true;
     }
 
+    /**
+     * Creates a new store file in a new store directory.
+     */
     void createStoreFile()
     {
         // expand '~' to the home directory if present
@@ -178,6 +185,9 @@ private:
         std::cout << "Created store file: " << this->storeFilePath << std::endl;
     }
 
+    /**
+     * Deletes the current store file and directory.
+     */
     void deleteStoreFileAndDirectory()
     {
         // remove store file
@@ -191,15 +201,36 @@ private:
                 "Directory couldn't be removed - directory not found OR not empty: " + this->storeFilePath.string());
     }
 
+    /**
+     * Initialises the header and writes it out to disk.
+     */
+    void initialiseHeader()
+    {
+        uint32_t batOffset = sizeof(Header);
+        uint32_t numBlocks = ceil(maxDataSize / blockSize);
+        uint32_t batSize = sizeof(uint32_t) + (numBlocks * sizeof(BATEntry));
+
+        this->header = Header(magicNumber, blockSize, maxDataSize, batOffset, batSize);
+        writeHeader();
+    }
+
+    /**
+     * Returns true if the local copy of the header is valid, false otherwise.
+     */
     bool headerValid()
     {
         return this->header.magicNumber == this->magicNumber;
     }
 
 public:
+    /* File header */
     Header header;
+
+    /* Block allocation table */
     BAT bat;
-    std::vector<uint8_t> freeSpaceBitmap;
+
+    /* Free space map for our block store */
+    std::vector<uint8_t> freeSpaceMap;
 
     /**
      * Default constructor
@@ -228,18 +259,10 @@ public:
             readBAT();
         }
 
-        // create new store file and directory
+        // create new store file
         else {
             createStoreFile();
-
-            /**
-             * NOTE: We write the header immediately, as this is fixed.
-             * 
-             * The BAT, however, is initialised empty (obviously), 
-             * so no need to write it out.
-             */
-            this->header = Header(magicNumber, sizeof(Header), 0, blockSize, maxDataSize);
-            writeHeader();
+            initialiseHeader();
         }
     }
 
@@ -268,7 +291,7 @@ public:
      */
     void writeHeader()
     {
-        this->storeFile.open(storeFilePath, std::fstream::out);
+        this->storeFile.open(this->storeFilePath, std::fstream::out);
 
         if (this->storeFile.is_open()) {
             this->storeFile.seekp(0);
@@ -285,7 +308,7 @@ public:
      */
     void readBAT()
     {
-        this->storeFile.open(storeFilePath, std::fstream::in | std::fstream::out);
+        this->storeFile.open(this->storeFilePath, std::fstream::in | std::fstream::out);
 
         if (this->storeFile.is_open()) {
 
@@ -312,7 +335,7 @@ public:
      */
     void writeBAT()
     {
-        this->storeFile.open(storeFilePath, std::fstream::in | std::fstream::out);
+        this->storeFile.open(this->storeFilePath, std::fstream::in | std::fstream::out);
 
         if (this->storeFile.is_open()) {
 
@@ -358,12 +381,192 @@ public:
 
         return buffer;
     }
+
+    /**
+     * Finds and returns pointer to `key`'s corresponding BAT entry
+     */
+    std::optional<BATEntry*> findBATEntry(std::string key)
+    {
+        for (auto &be : this->bat.table)
+        {
+            if (be.keyHash == Crypto::sha256_32(key))
+                return &be;
+        }
+        return std::nullopt;
+    }
+
+    /**
+     * Retreive and return all blocks of the given key.
+     */
+    std::vector<Block> getBlocks(std::string key)
+    {
+        /*
+        Plan:
+            - read header and BAT
+            - find `key`'s BAT entry
+            - read `numBytes` block-by-block into a buffer
+                - validate each block read against free space map
+            - create, populate and return std::vector<Block>
+                - pointers point to buffer
+        */
+
+       std::vector<Block> blocks;
+       return blocks;
+    }
+
+    /**
+     * Write the given blocks for the given key.
+     * 
+     * NOTE: 
+     * 
+     * If `key` already exists, we:
+     *      - overwrite its BAT entry AND;
+     *      - free the existing blocks AND;
+     *      - write the new blocks
+     */
+    void writeBlocks(std::string key, std::vector<Block> blocks)
+    {
+        /*
+        Plan:
+            - using free space map, find N-block contiguous space
+            - write data out block by block
+                - update free space map each time
+                - grow file as needed (should maybe just pre-allocate)
+            - create/replace BAT entry and write BAT out
+                - only do once we have validly written out all blocks
+        */
+
+        BATEntry *existingEntryPtr = nullptr;
+        auto entry = findBATEntry(key);
+        if (entry)
+            existingEntryPtr = *entry;
+
+        // TODO: get new first block number from free space map (guaranteed N-block cont. space after)
+        int firstBlockNum = 0;
+
+        // write out data block-by-block
+        for (auto block : blocks)
+        {
+            // TODO: write block
+        }
+
+        if (existingEntryPtr)
+        {
+            // de-allocate existing blocks
+            // allocate new blocks
+            // update fields
+        } else {
+            // allocate new blocks
+            // insert new entry
+
+        }
+    }
+};
+
+/**
+ * Free space map used to find contiguous chunks of blocks on disk.
+ */
+class FreeSpaceMap
+{
+public:
+
+    /**
+     * Number of blocks bitmap keeps track of
+     */
+    uint32_t blockCapacity;
+
+    /**
+     * Use a bitmap
+     */
+    std::vector<uint8_t> bitMap;
+
+    /**
+     * Default constructor
+     */
+    FreeSpaceMap(uint32_t blockCapacity)
+        : blockCapacity(blockCapacity)
+    {
+        int numEntries = ceil(blockCapacity / 8);
+        this->bitMap = std::vector<uint8_t>(numEntries, 0);
+    }
+
+    /**
+     * Returns true if the given block is mapped, false if its free
+     */
+    bool isMapped(uint32_t blockNum)
+    {
+        int index = blockNum / 8;
+        if (index >= bitMap.size())
+            throw std::runtime_error("Block number not mapped: " + std::to_string(blockNum));
+
+        int pos = blockNum % 8;
+        return bitMap[index] >> pos & 0x01;
+    }
+
+    /**
+     * Finds and allocates a contiguous chunk of `N` free blocks.
+     * 
+     * Returns the starting block number.
+     */
+    std::optional<uint32_t> allocateNBlocks(uint32_t N)
+    {
+        // TODO: find `N` contiguous free blocks
+        // just have to iterate every pos
+        // when find alloc'd, can just jump forward to 1 past this point
+        // can quickly check 8-block chunks
+
+        // TODO: allocate `N` blocks, starting from startBlockNum
+        return std::nullopt;
+    }
+
+    /**
+     * Frees N contiguous blocks starting at block number `startBlockNum`.
+     */
+    void freeNBlocks(uint32_t startBlockNum, uint32_t N)
+    {
+        if (N < 1)
+            return;
+
+        uint32_t index = startBlockNum / 8;  // byte index
+        uint32_t pos = startBlockNum % 8; // position in byte
+
+        // free any un-aligned blocks at the beginning
+        if (pos != 0)
+        {
+            uint32_t bitsToFree = std::min(N, 8 - pos);
+            freeBitsInByte(index, pos, bitsToFree);
+            N -= bitsToFree;
+            index++;
+        }
+
+        // free aligned blocks
+        while (N >= 8)
+        {
+            bitMap[index++] = 0;
+            N -= 8;
+        }
+
+        // free any un-aligned blocks at the end
+        if (N > 0)
+        {
+            freeBitsInByte(index, 0, N);
+        }
+    }
+
+private:
+    /**
+     * Frees `count` bits starting at `startPos` of byte with index `index`
+     */
+    void freeBitsInByte(uint32_t index, uint32_t startPos, uint32_t count)
+    {
+        uint32_t mask = ((1 << count) - 1) << startPos;  // 1's in positions to be free'd
+        bitMap[index] &= ~mask; 
+    }
 };
 
 ////////////////////////////////////////////
 // DiskStorage tests
 ////////////////////////////////////////////
-
 namespace DiskStorageTests
 {
     void testCanWriteNewHeaderAndBat()
@@ -401,7 +604,50 @@ namespace DiskStorageTests
         std::vector<unsigned char> buffer = ds.readRawStoreFile();
         PrintUtils::printVector(buffer);
     }
+}
 
+////////////////////////////////////////////
+// FreeSpaceMap tests
+////////////////////////////////////////////
+namespace FreeSpaceMapTests
+{
+    void testFreeNBlocks()
+    {
+        int blockCapacity = 32;
+        FreeSpaceMap fsm(blockCapacity);
+
+        uint32_t startingBlockNum = 14;
+        uint32_t N = 12;
+
+        /**
+         * Allocate N blocks, starting at blockNum == startingBlockNum
+         */
+        fsm.bitMap[0] = 0xFF; // 8 blocks
+        fsm.bitMap[1] = 0xFF; // 8 blocks
+        fsm.bitMap[2] = 0xFF; // 8 blocks
+        fsm.bitMap[3] = 0x03; // 2 blocks
+
+        for (uint32_t i = 0; i < blockCapacity; i++)
+        {
+            bool mapped = fsm.isMapped(i);
+            std::cout << "Block " << i << " : " << mapped << std::endl;
+        }
+        std::cout << "---" << std::endl;
+
+        // free the blocks
+        fsm.freeNBlocks(startingBlockNum, N);
+
+        for (uint32_t i = 0; i < blockCapacity; i++)
+        {
+            bool mapped = fsm.isMapped(i);
+            std::cout << "Block " << i << " : " << mapped << std::endl;
+        }
+    }
+
+    void testAllocateNBlocks()
+    {
+
+    }
 
 }
 
@@ -409,4 +655,6 @@ int main()
 {
     // DiskStorageTests::testCanWriteNewHeaderAndBat();
     // DiskStorageTests::testCanReadExistingHeaderAndBat();
+
+    FreeSpaceMapTests::testFreeNBlocks();
 }
