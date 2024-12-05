@@ -520,7 +520,7 @@ public:
     }
 
     /**
-     * Frees N contiguous blocks starting at block number `startBlockNum`.
+     * Frees `N` contiguous blocks starting at block number `startBlockNum`.
      */
     void freeNBlocks(uint32_t startBlockNum, uint32_t N)
     {
@@ -551,6 +551,31 @@ public:
         {
             freeBitsInByte(index, 0, N);
         }
+    }
+
+    /**
+     * Returns string representation of the free space map.
+     * 
+     * NOTE:
+     * 
+     * By default, we only show mapped blocks.
+     * Setting showUnMapped = true shows unmapped blocks.
+     */
+    std::string toString(bool showUnMapped = false)
+    {
+        std::ostringstream oss;
+        oss << "\nFree space map" << std::endl;
+        oss << "---" << std::endl;
+        for (uint32_t i = 0; i < blockCapacity; i++)
+        {
+            bool mapped = isMapped(i);
+            if (mapped || showUnMapped)
+            {
+                oss << "Block " << i << " : " << mapped << std::endl;
+            }
+        }
+        oss << "---" << std::endl;
+        return oss.str();  // Convert the stream to a string and return it
     }
 
 private:
@@ -616,39 +641,26 @@ namespace FreeSpaceMapTests
         int blockCapacity = 32;
         FreeSpaceMap fsm(blockCapacity);
 
-        uint32_t startingBlockNum = 14;
-        uint32_t N = 12;
-
-        /**
-         * Allocate N blocks, starting at blockNum == startingBlockNum
-         */
+        // allocate some blocks
         fsm.bitMap[0] = 0xFF; // 8 blocks
         fsm.bitMap[1] = 0xFF; // 8 blocks
         fsm.bitMap[2] = 0xFF; // 8 blocks
         fsm.bitMap[3] = 0x03; // 2 blocks
 
-        for (uint32_t i = 0; i < blockCapacity; i++)
-        {
-            bool mapped = fsm.isMapped(i);
-            std::cout << "Block " << i << " : " << mapped << std::endl;
-        }
-        std::cout << "---" << std::endl;
+        std::cout << fsm.toString(false);
 
-        // free the blocks
+        // free `N` blocks starting at `startingBlockNum`
+        uint32_t startingBlockNum = 14;
+        uint32_t N = 12;
         fsm.freeNBlocks(startingBlockNum, N);
 
-        for (uint32_t i = 0; i < blockCapacity; i++)
-        {
-            bool mapped = fsm.isMapped(i);
-            std::cout << "Block " << i << " : " << mapped << std::endl;
-        }
+        std::cout << fsm.toString(false);
     }
 
     void testAllocateNBlocks()
     {
 
     }
-
 }
 
 int main()
