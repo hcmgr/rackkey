@@ -1,11 +1,15 @@
 ---------------------------------------
 PLAN / TODO
 ---------------------------------------
+- write the actual storage layer
 - compile and run the storage server using docker - right now, just deploy one server
 - error handling / more comprehensive testing / testing of edge cases
 - MAYBE: make MasterServer and StorageServer inherit from a more general HttpServer
-
-
+- generally clean up a lil
+- think about adding / removing nodes on the fly (as in - don't have to stop the master to do this)
+    - potentially requires nodes communicating with one another
+    - OR, when you transfer data, just do it in one big fuck off load
+- think about replication
 ---------------------------------------
 SCRIBBLES
 ---------------------------------------

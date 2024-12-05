@@ -1,0 +1,86 @@
+/*
+Plan: 
+    - one file that stores everything for that node
+    - store all blocks for given key contiguously
+        - getBlock() always reads all blocks for given key at once
+        - thus, storing contiguously makes it tremendous
+        - trade-off:
+            - fragmentation potentially becomes a problem
+            - deal with this later
+        - keep an in-memory free-space bitmap
+        - cache the header and the BAT
+        - only allow maxDataSize amount of block data
+
+BAT:
+    Two options:
+        dynamic BAT:
+            - one entry per key
+            - if num keys small, we're golden, because:
+                - BAT is small
+                - thus, fits into in-memory cache
+                - linearly searching through small, in-mem BAT
+                   faster than seeking and reading entry from disk
+            - if num keys large:
+                - BAT grows
+                - less nice to read into mem / cache
+            - upshot:
+                - we're read heavy AND presuming relatively low keys-per-node
+                - so we'll go with dynamic BAT for now
+        on-disk hash-table BAT:
+            - better if there's lots of keys and dynamic BAT becomes less good
+        
+                
+---------------------------------
+FILE FORMAT
+---------------------------------
+    HEADER:
+        Magic number - 4 bytes
+        BAT offset - 4 bytes
+        BAT size - 4 bytes
+        Block size - 4 bytes
+        Max data size - 4 bytes
+        
+    BAT:
+        Num entries - 4 bytes
+        ---
+        Key1 - max 50 bytes
+        First block offset - 4 bytes
+        Number of blocks/bytes - 4 bytes
+        ---
+        Key2 - max 50 bytes
+        First block offset - 4 bytes
+        Number of blocks/bytes - 4 bytes
+        ---
+        ...
+    
+    BLOCK STORE:
+        Block
+        Block
+        ...
+
+Methods:
+    private:
+        Header getHeader()
+
+        writeHeader(Header newHeader)
+
+    public:
+        DiskStorage()
+        
+        std::vector<Block> getBlocks(std::string key):
+            - read header / BAT
+            - bin. search on hash(key) to find key's BAT entry
+            - read N blocks from given offset into some buffer
+            - create, populate and return std::vector<Block>
+                - pointers point to the buffer
+
+        void writeBlocks(std::vector<Block> blocks):
+            - using free-space-map, find N-block contiguous space
+            
+---------------------------------
+POTENTIAL ALTERNATIVES TO EXPLORE
+---------------------------------
+    - not allocating blocks contiguously (to avoid fragmentation)
+        - potentially necessary - if storage nodes have a high file-size-utilisation
+    - dynamically allocating file rather than pre-allocating it
+        - not really necessary - don't think, going to have a max size anyway
