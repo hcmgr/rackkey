@@ -27,8 +27,6 @@ public:
     FreeSpaceMap(uint32_t blockCapacity);
 
     /**
-     * TODO:
-     * 
      * Finds `N` contiguous free blocks and allocates them.
      * 
      * Returns the starting block number.
@@ -53,8 +51,6 @@ public:
 private:
 
     /**
-     * TODO:
-     * 
      * Finds `N` contiguous free blocks and returns the 
      * starting block number.
      */

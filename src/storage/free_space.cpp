@@ -20,8 +20,6 @@ FreeSpaceMap::FreeSpaceMap(uint32_t blockCapacity)
 }
 
 /**
- * TODO:
- * 
  * Finds `N` contiguous free blocks and allocates them.
  * 
  * Returns the starting block number.
@@ -129,8 +127,6 @@ std::string FreeSpaceMap::toString(bool showUnMapped)
 ////////////////////////////////////////////
 
 /**
- * TODO:
- * 
  * Finds `N` contiguous free blocks and returns the 
  * starting block number.
  */
