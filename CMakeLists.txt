@@ -47,6 +47,7 @@ target_include_directories(master PRIVATE
 set(DISK_SRC_DIR "${CMAKE_SOURCE_DIR}/src/storage")
 file(GLOB SOURCES
     "${DISK_SRC_DIR}/disk_storage.cpp"
+    "${DISK_SRC_DIR}/free_space.cpp"
     "${SHARED_SRC_DIR}/*.cpp"
 ) 
 add_executable(disk ${SOURCES})
