@@ -131,6 +131,19 @@ struct BAT
     {
     }
 
+    /**
+     * Finds and returns an iterator to `key`'s corresponding BAT entry.
+     */
+    std::optional<std::vector<BATEntry>::iterator> findBATEntry(uint32_t keyHash)
+    {
+        for (auto it = table.begin(); it != table.end(); ++it)
+        {
+            if (it->keyHash == keyHash)
+                return it;
+        }
+        return std::nullopt;
+    }
+
     bool equals(BAT other)
     {
         if (numEntries != other.numEntries)
@@ -308,47 +321,30 @@ public:
     }
 
     /**
-     * Read the store file into a buffer of raw bytes.
+     * Reads `N` raw disk blocks into a buffer, starting at block `startingBlockNum`.
      * 
      * NOTE: used for debugging purposes mostly; such 
      *       buffers can be printed nicely using
      *       PrintUtils::printVector() (see utils.hpp)
      */
-    std::vector<unsigned char> readRawStoreFile()
+    std::vector<unsigned char> readRawDiskBlocks(uint32_t startingDiskBlockNum, uint32_t N)
     {
-        std::vector<unsigned char> buffer;
+        uint32_t numBytes = N * this->header.diskBlockSize;
+        uint32_t offset = getDiskBlockOffset(startingDiskBlockNum);
 
-        // open the file for reading in binary mode
-        this->storeFile.open(storeFilePath, std::fstream::in);
+        std::vector<unsigned char> buffer(numBytes);
 
-        if (this->storeFile.is_open()) {
-            // get length of file
-            this->storeFile.seekg(0, std::fstream::end);
-            std::streampos fileSize = this->storeFile.tellg(); 
-            this->storeFile.seekg(0, std::fstream::beg); 
-
-            // read the file content into the buffer
-            buffer.resize(fileSize); 
-            this->storeFile.read(reinterpret_cast<char*>(buffer.data()), fileSize);
-            this->storeFile.close();
-        } else {
-            std::cerr << "Failed to open file for reading!" << std::endl;
-        }
-
-        return buffer;
-    }
-
-    /**
-     * Finds and returns pointer to `key`'s corresponding BAT entry
-     */
-    std::optional<BATEntry*> findBATEntry(std::string key)
-    {
-        for (auto &be : this->bat.table)
+        this->storeFile.open(storeFilePath, std::fstream::in | std::fstream::out);
+        if (this->storeFile.is_open())
         {
-            if (be.keyHash == Crypto::sha256_32(key))
-                return &be;
+            this->storeFile.seekg(offset);
+            this->storeFile.read(reinterpret_cast<char*>(buffer.data()), numBytes);
+            this->storeFile.close();
         }
-        return std::nullopt;
+        else
+            throw std::runtime_error("Failed to open file for reading!");
+        
+        return buffer;
     }
 
     /**
@@ -364,12 +360,11 @@ public:
     std::vector<Block> readBlocks(std::string key, std::vector<unsigned char> &readBuffer)
     {
         // find BAT entry of `key`
-        BATEntry *existingEntryPtr = nullptr;
-        auto entry = findBATEntry(key);
+        auto entry = this->bat.findBATEntry(Crypto::sha256_32(key));
         if (entry == std::nullopt)
             throw std::runtime_error("No BAT entry found for given key: " + key);
 
-        BATEntry *batEntry = *entry;
+        auto batEntry = *entry;
 
         /**
          * Read all block data into a single buffer.
@@ -384,6 +379,7 @@ public:
         {
             this->storeFile.seekg(offset);
             this->storeFile.read(reinterpret_cast<char*>(readBuffer.data()), numBytes);
+            this->storeFile.close();
         }
         else
             throw std::runtime_error("Failed to open file for reading!");
@@ -470,15 +466,13 @@ public:
         else
             throw std::runtime_error("Failed to open file for writing!");
         
-        // find existing BAT entry, if it exists
-        BATEntry *existingBatEntry = nullptr;
-        auto entry = findBATEntry(key);
-        if (entry != std::nullopt)
-            existingBatEntry = *entry;
+        auto entry = this->bat.findBATEntry(Crypto::sha256_32(key));
 
         // update existing BAT entry
-        if (existingBatEntry)
+        if (entry != std::nullopt)
         {
+            auto existingBatEntry = *entry;
+
             // de-allocate existing blocks
             uint32_t oldStartingDiskBlockNum = 0;
             uint32_t oldN = 0;
@@ -506,6 +500,33 @@ public:
 
         // write out updated BAT
         writeBAT();
+    }
+
+    void deleteBlocks(std::string key)
+    {
+        // find `key`s BAT entry
+        auto entry = this->bat.findBATEntry(Crypto::sha256_32(key));
+        if (entry == std::nullopt)
+            throw std::runtime_error("No BAT entry exists for key: " + key);
+        
+        auto batEntry = *entry;
+
+        /**
+         * Free block bits in free space map.
+         * 
+         * NOTE: 
+         * 
+         * We do not override actual block data. Provided a block is considered 'free',
+         * we can freely (pardon the pun) write over that block in the future.
+         */
+        uint32_t startingDiskBlockNum = batEntry->startingDiskBlockNum;
+        uint32_t N = getNumDiskBlocks(batEntry->numBytes, this->header.diskBlockSize);
+
+        this->freeSpaceMap.freeNBlocks(startingDiskBlockNum, N);
+
+        // remove bat entry
+        this->bat.numEntries--;
+        this->bat.table.erase(batEntry);
     }
 
     /**
@@ -545,6 +566,11 @@ private:
     uint32_t getDiskBlockOffset(uint32_t diskBlockNum)
     {
         return this->header.blockStoreOffset + (this->header.diskBlockSize * diskBlockNum);
+    }
+
+    uint32_t getNumDiskBlocks(uint32_t numBytes, uint32_t blockSize)
+    {
+        return MathUtils::ceilDiv(numBytes, blockSize);
     }
 
     /**
@@ -743,14 +769,41 @@ namespace DiskStorageTests
 
     void testCanDeleteKeysBlocks()
     {
+        setup();
 
+        uint32_t blockSize = 20;
+        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 30);
+
+        // write some blocks 
+        std::string key = "archive.zip";
+        uint32_t N = 2;
+        uint32_t numBytes = N * blockSize + 10;
+        std::vector<std::vector<unsigned char>> writeDataBuffers;
+        std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, blockSize, numBytes, writeDataBuffers);
+        ds.writeBlocks(key, writeBlocks);
+
+        std::cout << ds.bat.toString() << std::endl;
+        std::cout << ds.freeSpaceMap.toString() << std::endl;
+        std::vector<unsigned char> oldRawData = ds.readRawDiskBlocks(0, N+1);
+        PrintUtils::printVector(oldRawData);
+
+        // delete blocks
+        ds.deleteBlocks(key);
+
+        std::cout << ds.bat.toString() << std::endl;
+        std::cout << ds.freeSpaceMap.toString() << std::endl;
+        std::vector<unsigned char> newRawData = ds.readRawDiskBlocks(0, N+1);
+        PrintUtils::printVector(newRawData);
+
+        teardown();
     }
 }
 
 int main()
 {
-    DiskStorageTests::testCanWriteAndReadNewHeaderAndBat();
-    DiskStorageTests::testCanWriteAndReadBlocksOneKey();
+    // DiskStorageTests::testCanWriteAndReadNewHeaderAndBat();
+    // DiskStorageTests::testCanWriteAndReadBlocksOneKey();
+    DiskStorageTests::testCanDeleteKeysBlocks();
 
     // FreeSpaceMapTests::testFreeNBlocks();
     // FreeSpaceMapTests::testAllocateNBlocks();
@@ -760,19 +813,13 @@ int main()
 
 /*
 Immediate todo:
-    - test / write tests for readBlocks() / writeBlocks()
-        - give BlockTests a generateRandom(N, size) function
-          that can generate `N` blocks of size `size`
+    - deleteBlocks()
     - checks in server.cpp that:
         - blocks are in correct order (disk_storage presumes they are)
         - first (blockNum - 1) blocks are full
     - have a go at using it to save blocks and retreive them
     - handle hash collisions:
         - heh?
-    - probably pre-allocate the whole file at the start
-        - write byte to last position (some EOF byte or something)
-        - i.e. at maxDataSize + 1 position
-    
     
 General cleanup:
     - make helper method for opening and closing store file
@@ -783,6 +830,11 @@ General cleanup:
         - perhaps can abstract the file path stuff to another class
     - nice explanation at top of disk_storage.cpp/.hpp
     - emphasise difference between diskBlocks and dataBlocks
-        - perhaps re-name Block to DataBlock
+        - ehhh...we are now only storing the data in our 
+          on-disk blocks, so there really is no distinction
+        - only potential complexity is that:
+            - for us, data block size == disk block size (always)
+            - think through consequences of allowing data vs disk block
+              size to be difference
     - storage vs store naming? (DiskStorage -> StoreFile)?
 */
