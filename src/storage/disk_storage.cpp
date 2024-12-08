@@ -184,16 +184,14 @@ public:
         std::string storeFileName = "store",
         uint32_t magicNumber = 0xABABABAB,
         uint32_t diskBlockSize = 4096,
-        uint32_t maxDataSize = 1u << 30,
-        bool removeStoreOnExit = false
+        uint32_t maxDataSize = 1u << 30
     )
         : storeDirPath(fs::path(storeDirPath)),
           storeFileName(storeFileName),
           magicNumber(magicNumber),
           diskBlockSize(diskBlockSize),
           maxDataSize(maxDataSize),
-          freeSpaceMap(MathUtils::ceilDiv(maxDataSize, diskBlockSize)),
-          removeStoreOnExit(removeStoreOnExit)
+          freeSpaceMap(MathUtils::ceilDiv(maxDataSize, diskBlockSize))
     {
         this->storeFilePath = this->storeDirPath / this->storeFileName;
 
@@ -216,8 +214,6 @@ public:
 
     ~DiskStorage()
     {
-        if (removeStoreOnExit)
-            DiskStorage::removeStoreFileAndDirectory(storeDirPath, storeFileName);
     }
 
     uint32_t totalFileSize()
@@ -365,7 +361,7 @@ public:
      * We pass this in so that the data the block pointers reference
      * does not get de-allocated.
      */
-    std::vector<Block> getBlocks(std::string key, std::vector<unsigned char> &readBuffer)
+    std::vector<Block> readBlocks(std::string key, std::vector<unsigned char> &readBuffer)
     {
         // find BAT entry of `key`
         BATEntry *existingEntryPtr = nullptr;
@@ -436,8 +432,6 @@ public:
      */
     void writeBlocks(std::string key, std::vector<Block> dataBlocks)
     {
-        std::cout << this->header.toString() << std::endl << std::endl;
-
         // find N contiguous disk blocks and retreive the starting block number
         uint32_t N = dataBlocks.size();
         auto alloc = freeSpaceMap.findNFreeBlocks(N);
@@ -523,7 +517,7 @@ public:
 
         if (!fs::exists(storeFilePath))
         {
-            std::cout << "Store file to be removed does not exist: " + storeFilePath.string() << std::endl;
+            // std::cout << "Store file to be removed does not exist: " + storeFilePath.string() << std::endl;
             return;
         }
 
@@ -544,13 +538,6 @@ private:
 
     fs::path storeFilePath;
     std::fstream storeFile;
-
-    /**
-     * TODO:
-     * 
-     * REMOVE THIS FOR PROD - potentially disastrous, just here for debugging.
-     */
-    bool removeStoreOnExit;
 
     /**
      * Returns offset of disk block `diskBlockNum`
@@ -655,13 +642,24 @@ private:
 ////////////////////////////////////////////
 namespace DiskStorageTests
 {
+    void setup()
+    {
+        // remove existing store of a previous test
+        DiskStorage::removeStoreFileAndDirectory(fs::path("rackkey"), "store");
+    }
+
+    void teardown()
+    {
+        // remove store created during current test
+        DiskStorage::removeStoreFileAndDirectory(fs::path("rackkey"), "store");
+    }
+
     void testCanWriteAndReadNewHeaderAndBat()
     {
-        // remove existing store
-        DiskStorage::removeStoreFileAndDirectory(fs::path("rackkey"), "store");
+        setup();
 
         // implictly creates and writes header
-        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, 4192, 1u << 30, false);
+        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, 4192, 1u << 30);
 
         // create and write BAT
         int N = 3;
@@ -677,7 +675,7 @@ namespace DiskStorageTests
         BAT oldBat = ds.bat;
 
         // instantiate new object so don't have header or BAT cached (i.e. must read from disk)
-        DiskStorage newDs = DiskStorage("rackkey", "store", 0xABABABAB, 4192, 1u << 30, true);
+        DiskStorage newDs = DiskStorage("rackkey", "store", 0xABABABAB, 4192, 1u << 30);
 
         Header newHeader = newDs.header;
         BAT newBat = ds.bat;
@@ -685,7 +683,9 @@ namespace DiskStorageTests
         assert(oldHeader.equals(newHeader));
         assert(oldBat.equals(newBat));
 
-        std::cout << "SUCCESS" << std::endl;
+        std::cerr << "Test: " << __FUNCTION__ << " - " << "SUCCESS" << std::endl;
+
+        teardown();
     }
 
     /**
@@ -693,8 +693,10 @@ namespace DiskStorageTests
      */
     void testCanWriteAndReadBlocksOneKey()
     {
+        setup();
+
         uint32_t blockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 30, false);
+        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 30);
 
         std::string key = "archive.zip";
         uint32_t N = 2;
@@ -705,16 +707,12 @@ namespace DiskStorageTests
         std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, blockSize, numBytes, writeDataBuffers);
         ds.writeBlocks(key, writeBlocks);
 
-        // std::cout << "Wrote blocks: " << std::endl;
-        // for (auto block : writeBlocks)
-        //     std::cout << block.toString(true) << std::endl;
-        
         // instantiate new object so don't have header, bat or file stream cached (i.e. must read from disk)
-        DiskStorage newDs = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 30, true);
+        DiskStorage newDs = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 30);
 
         // read blocks
         std::vector<unsigned char> readBuffer;
-        std::vector<Block> readBlocks = newDs.getBlocks(key, readBuffer);
+        std::vector<Block> readBlocks = newDs.readBlocks(key, readBuffer);
 
         // ensure what we wrote is what we read
         if (writeBlocks.size() != readBlocks.size())
@@ -728,13 +726,30 @@ namespace DiskStorageTests
         for (uint32_t i = 0; i < writeBlocks.size(); i++)
             assert(writeBlocks[i].equals(readBlocks[i]));
         
-        std::cout << "SUCCESS" << std::endl;
+        std::cerr << "Test: " << __FUNCTION__ << " - " << "SUCESS" << std::endl;
+    
+        teardown();
+    }
+
+    void testCanWriteMultipleKeysBlocks()
+    {
+
+    }
+
+    void testCanOverwriteExistingKeyBlocks()
+    {
+
+    }
+
+    void testCanDeleteKeysBlocks()
+    {
+
     }
 }
 
 int main()
 {
-    // DiskStorageTests::testCanWriteAndReadNewHeaderAndBat();
+    DiskStorageTests::testCanWriteAndReadNewHeaderAndBat();
     DiskStorageTests::testCanWriteAndReadBlocksOneKey();
 
     // FreeSpaceMapTests::testFreeNBlocks();

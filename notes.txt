@@ -12,6 +12,11 @@ PLAN / TODO
 general todo:
     - change prettyPrint to toString() that actually returns a string
     - (as much as possible) change tests from simple prints to actual 'red-and-green' tests
+        - create c++ testing module (perhaps re-use one from jpeg compression project (think I had one in there))
+          to print red and green test text easily
+        - consider: right now, all my std::cout is printing alongside test messages
+            - want my test messages to appear in a separate stream, so its nice and clear
+              which are passing and which aren't
     - generally error check better
         - change 'print-returns' to error throws
     - generally clean up
