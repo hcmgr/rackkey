@@ -3,7 +3,9 @@
 #include <cpprest/http_listener.h>
 #include <cpprest/json.h>
 #include <cpprest/http_client.h>
+
 #include <iostream>
+#include <cstdint>
 
 using namespace web;
 using namespace web::http;
@@ -38,7 +40,7 @@ namespace PrintUtils {
     {
         std::cout << "[ ";
         for (size_t i = 0; i < vec.size(); ++i) {
-            std::cout << static_cast<int>(vec[i]);
+            std::cout << static_cast<char>(vec[i]);
             if (i != vec.size() - 1) {
                 std::cout << ", ";
             }
@@ -63,3 +65,13 @@ namespace PrintUtils {
      */
     void printHex32(uint32_t value);
 };
+
+namespace MathUtils
+{
+    /**
+     * Returns ceiling of integer division of `numerator` and `denominator`.
+     * 
+     * e.g. 7 / 3 => 3
+     */
+    uint32_t ceilDiv(uint32_t numerator, uint32_t denominator);
+}

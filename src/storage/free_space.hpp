@@ -27,11 +27,15 @@ public:
     FreeSpaceMap(uint32_t blockCapacity);
 
     /**
-     * Finds `N` contiguous free blocks and allocates them.
-     * 
-     * Returns the starting block number.
+     * Finds `N` contiguous free blocks and returns the 
+     * starting block number.
      */
-    std::optional<uint32_t> allocateNBlocks(uint32_t N);
+    std::optional<uint32_t> findNFreeBlocks(uint32_t N);
+
+    /**
+     * Allocates `N` contiguous blocks starting at block number `startBlockNum`.
+     */
+    std::optional<uint32_t> allocateNBlocks(uint32_t startBlockNum, uint32_t N);
 
     /**
      * Frees `N` contiguous blocks starting at block number `startBlockNum`.
@@ -50,11 +54,7 @@ public:
 
 private:
 
-    /**
-     * Finds `N` contiguous free blocks and returns the 
-     * starting block number.
-     */
-    std::optional<uint32_t> findNFreeBlocks(uint32_t N);
+
 
     /**
      * Allocates `count` bits of byte with index `index`, starting at `startPos`

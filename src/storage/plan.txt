@@ -10,6 +10,17 @@ Plan:
         - keep an in-memory free-space bitmap
         - cache the header and the BAT
         - only allow maxDataSize amount of block data
+    - IMPORTANT NOTE:
+        - storing the blocks contiguously presumes that the
+          first (blockNum - 1) blocks are full
+        - if this is NOT the case, then we read unintended junk/NULL
+          bytes at the end of some blocks
+        - recall the advantage of storing contiguously:
+            - we always read/write all key's blocks
+            - therefore, we can read/write key's blocks
+              in one disk I/O
+        - NOTE: ensure in transmission that first 
+                (blockNum - 1) blocks are full
 
 BAT:
     Two options:

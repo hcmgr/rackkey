@@ -1,7 +1,6 @@
 ---------------------------------------
 PLAN / TODO
 ---------------------------------------
-- write the actual storage layer
 - compile and run the storage server using docker - right now, just deploy one server
 - error handling / more comprehensive testing / testing of edge cases
 - MAYBE: make MasterServer and StorageServer inherit from a more general HttpServer
@@ -10,9 +9,16 @@ PLAN / TODO
     - OR, when you transfer data, just do it in one big fuck off load
 - think about replication
 
-weird todo:
+general todo:
     - change prettyPrint to toString() that actually returns a string
+    - (as much as possible) change tests from simple prints to actual 'red-and-green' tests
+    - generally error check better
+        - change 'print-returns' to error throws
     - generally clean up
+
+toLearn:
+    - exactly when unique_ptr / shared_ptr goes out of scope
+      and generally when things get auto de-allocated
     
 ---------------------------------------
 SCRIBBLES

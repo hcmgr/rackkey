@@ -53,3 +53,16 @@ namespace PrintUtils {
                   << std::endl;
     }
 }
+
+namespace MathUtils
+{
+    /**
+     * Returns ceiling of integer division of `numerator` and `denominator`.
+     * 
+     * e.g. 7 / 3 => 3
+     */
+    uint32_t ceilDiv(uint32_t numerator, uint32_t denominator)
+    {
+        return (numerator + denominator - 1) / denominator;
+    }
+}

@@ -13,29 +13,27 @@
 class Block {
 public:
     std::string key;
-    int blockNum;
+    uint32_t blockNum;
 
-    int dataSize;
+    uint32_t dataSize;
     std::vector<unsigned char>::iterator dataStart;
     std::vector<unsigned char>::iterator dataEnd;
 
     /**
      * Default constructor
      */
+    Block();
+
+    /**
+     * Parameterised constructor
+     */
     Block(
         std::string key,
-        int blockNum,
-        int dataSize,
+        uint32_t blockNum,
+        uint32_t dataSize,
         std::vector<unsigned char>::iterator dataStart,
         std::vector<unsigned char>::iterator dataEnd
     );
-
-    /**
-     * Pretty print Block metadata.
-     * 
-     * On showData == true, block data is also printed.
-     */
-    void prettyPrint(bool showData);
 
     /**
      * Serializes the block into the given byte array
@@ -46,6 +44,39 @@ public:
      * Deserialize block buffer into vector of Block objects
      */
     static std::vector<Block> deserialize(std::vector<unsigned char>& inputBuffer);
+
+    /**
+     * Checks all meta data fields AND full data section for equality.
+     */
+    bool equals(Block &other);
+
+    /**
+     * Returns the string represenation of a Block.
+     * 
+     * NOTE: 
+     * 
+     * By default, we only show block meta data (i.e. key, block num and data size).
+     * On showData == true, raw block data is also shown.
+     */
+    std::string toString(bool showData = false);
+};
+
+
+namespace BlockUtils
+{
+    /**
+     * Generate `N` blocks with total data size `totalDataSize`, each with
+     * key `key`.
+     * 
+     * NOTE: used to write tests for Block and other modules.
+     */
+    std::vector<Block> generateNRandom(
+        std::string key, 
+        uint32_t N, 
+        uint32_t blockSize,
+        uint32_t numBytes,
+        std::vector<std::vector<unsigned char>> &dataBuffers
+    );
 };
 
 namespace BlockTests
