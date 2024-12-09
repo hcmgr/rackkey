@@ -75,3 +75,8 @@ namespace MathUtils
      */
     uint32_t ceilDiv(uint32_t numerator, uint32_t denominator);
 }
+
+namespace VectorUtils
+{
+    std::vector<unsigned char> flatten(std::vector<std::vector<unsigned char>>& vecs);
+}

@@ -43,6 +43,17 @@ public:
     void freeNBlocks(uint32_t startBlockNum, uint32_t N);
 
     /**
+     * Returns true if the given block is mapped, false if its free
+     */
+    bool isMapped(uint32_t blockNum);
+
+    /**
+     * Returns true if the repective blockCapacity's and bit maps 
+     * are equal, false otherwise.
+     */
+    bool equals(FreeSpaceMap other);
+
+    /**
      * Returns string representation of the free space map.
      * 
      * NOTE:
@@ -53,9 +64,6 @@ public:
     std::string toString(bool showUnMapped = false);
 
 private:
-
-
-
     /**
      * Allocates `count` bits of byte with index `index`, starting at `startPos`
      */
@@ -65,11 +73,6 @@ private:
      * Frees `count` bits of byte with index `index`, starting at `startPos`
      */
     void freeBitsInByte(uint32_t index, uint32_t startPos, uint32_t count);
-
-    /**
-     * Returns true if the given block is mapped, false if its free
-     */
-    bool isMapped(uint32_t blockNum);
 };
 
 /**

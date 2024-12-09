@@ -66,3 +66,16 @@ namespace MathUtils
         return (numerator + denominator - 1) / denominator;
     }
 }
+
+namespace VectorUtils
+{
+    std::vector<unsigned char> flatten(std::vector<std::vector<unsigned char>>& vecs) 
+    {
+        std::vector<unsigned char> result;
+        for (auto& vec: vecs) 
+        {
+            result.insert(result.end(), vec.begin(), vec.end());
+        }
+        return result;
+    }
+}

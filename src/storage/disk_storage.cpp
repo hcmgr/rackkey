@@ -122,6 +122,7 @@ struct BAT
     std::vector<BATEntry> table;
 
     BAT()
+        : numEntries(0)
     {
     }
 
@@ -204,7 +205,7 @@ public:
           magicNumber(magicNumber),
           diskBlockSize(diskBlockSize),
           maxDataSize(maxDataSize),
-          freeSpaceMap(MathUtils::ceilDiv(maxDataSize, diskBlockSize))
+          freeSpaceMap(getNumBlocks(maxDataSize))
     {
         this->storeFilePath = this->storeDirPath / this->storeFileName;
 
@@ -229,7 +230,12 @@ public:
     {
     }
 
-    uint32_t totalFileSize()
+    uint32_t getNumBlocks(uint32_t numBytes)
+    {
+        return MathUtils::ceilDiv(numBytes, diskBlockSize);
+    }
+
+    uint32_t getTotalFileSize()
     {
         return sizeof(this->header) + this->header.batSize + this->header.maxDataSize;
     }
@@ -392,7 +398,7 @@ public:
          */
         std::vector<Block> blocks;
 
-        uint32_t numBlocks = MathUtils::ceilDiv(numBytes, this->header.diskBlockSize);
+        uint32_t numBlocks = getNumBlocks(numBytes);
         auto bufferIterator = readBuffer.begin();
 
         for (uint32_t i = 0; i < numBlocks; i++) 
@@ -428,16 +434,46 @@ public:
      */
     void writeBlocks(std::string key, std::vector<Block> dataBlocks)
     {
-        // find N contiguous disk blocks and retreive the starting block number
+        auto entry = this->bat.findBATEntry(Crypto::sha256_32(key));
+
+        /**
+         * If an entry already exists for the key, free its blocks
+         * in the freeSpaceMap.
+         * 
+         * NOTE: if the new block allocation fails, we use `freedBlocks`
+         *       to restore the old block allocation
+         */
+        std::pair<uint32_t, uint32_t> freedBlocks;
+        if (entry != std::nullopt)
+        {
+            auto existingBatEntry = *entry;
+
+            uint32_t oldStartingDiskBlockNum = existingBatEntry->startingDiskBlockNum;
+            uint32_t oldN = getNumBlocks(existingBatEntry->numBytes);
+            freedBlocks = {oldStartingDiskBlockNum, oldN};
+
+            freeSpaceMap.freeNBlocks(oldStartingDiskBlockNum, oldN);
+        }
+
+        // helper lambda to restore any freed blocks
+        auto restoreFreedBlocks = [&]() {
+        if (entry != std::nullopt)
+            this->freeSpaceMap.allocateNBlocks(freedBlocks.first, freedBlocks.second);
+        };
+
+        /**
+         * Find a contiguous section of N free disk blocks and retreive
+         * the starting block number.
+         */
         uint32_t N = dataBlocks.size();
         auto alloc = freeSpaceMap.findNFreeBlocks(N);
         if (alloc == std::nullopt)
-            throw std::runtime_error("FUCKKKK");
+            throw std::runtime_error("No contiguous section of " + std::to_string(N) + " blocks found");
 
         /**
          * Copy all block data into a single buffer (which we later write out to disk).
          * 
-         * NOTE: we do this because an in-memory copy and single disk I/O is 
+         * NOTE: we do this because an in-memory copy and a single disk I/O is 
          *       faster than N disk I/O's (espeically for large block sizes)
          */
         std::vector<unsigned char> buffer;
@@ -450,8 +486,11 @@ public:
         }
 
         if (buffer.size() != numBytes)
+        {
+            restoreFreedBlocks();
             throw std::runtime_error("Bad copy of data blocks to output buffer");
-
+        }
+            
         // write buffer out to disk
         uint32_t startingDiskBlockNum = *alloc;
         uint32_t offset = getDiskBlockOffset(startingDiskBlockNum);
@@ -461,29 +500,36 @@ public:
         {
             this->storeFile.seekp(offset);
             this->storeFile.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+
+            if (this->storeFile.fail() || this->storeFile.bad())
+            {
+                restoreFreedBlocks();
+                throw std::runtime_error("Bad write of cumulative block data to disk");
+            }
+                
             this->storeFile.close();
         }
         else
+        {
+            restoreFreedBlocks();
             throw std::runtime_error("Failed to open file for writing!");
-        
-        auto entry = this->bat.findBATEntry(Crypto::sha256_32(key));
+        }
+
+        // allocate new blocks
+        freeSpaceMap.allocateNBlocks(startingDiskBlockNum, N);
 
         // update existing BAT entry
         if (entry != std::nullopt)
         {
             auto existingBatEntry = *entry;
 
-            // de-allocate existing blocks
-            uint32_t oldStartingDiskBlockNum = 0;
-            uint32_t oldN = 0;
-            freeSpaceMap.freeNBlocks(oldStartingDiskBlockNum, oldN);
-
-            // allocate new blocks
-            freeSpaceMap.allocateNBlocks(startingDiskBlockNum, N);
-
             // update entry fields
             existingBatEntry->startingDiskBlockNum = startingDiskBlockNum;
             existingBatEntry->numBytes = numBytes;
+
+            /**
+             * NOTE: at this point, the existing blocks have already been freed
+             */
         } 
 
         // create and insert new BAT entry
@@ -584,7 +630,7 @@ private:
     void initialiseHeader()
     {
         uint32_t batOffset = sizeof(Header);
-        uint32_t numBlocks = MathUtils::ceilDiv(this->maxDataSize, this->diskBlockSize);
+        uint32_t numBlocks = getNumBlocks(this->maxDataSize);
         uint32_t batSize = sizeof(uint32_t) + (numBlocks * sizeof(BATEntry));
         uint32_t blockStoreOffset = sizeof(Header) + batSize;
 
@@ -655,7 +701,7 @@ private:
         std::cout << "Created store file: " << this->storeFilePath << std::endl;
 
         // write to max byte
-        uint32_t totalFileSize = this->totalFileSize();
+        uint32_t totalFileSize = this->getTotalFileSize();
         this->storeFile.seekp(totalFileSize - 1);
         this->storeFile.put(0);
         this->storeFile.flush();
@@ -679,6 +725,8 @@ namespace DiskStorageTests
         // remove store created during current test
         DiskStorage::removeStoreFileAndDirectory(fs::path("rackkey"), "store");
     }
+
+
 
     void testCanWriteAndReadNewHeaderAndBat()
     {
@@ -717,7 +765,7 @@ namespace DiskStorageTests
     /**
      * Tests that we can write a single key's blocks to disk and read them back out.
      */
-    void testCanWriteAndReadBlocksOneKey()
+    void testCanWriteAndReadOneKeysBlocks()
     {
         setup();
 
@@ -757,53 +805,256 @@ namespace DiskStorageTests
         teardown();
     }
 
-    void testCanWriteMultipleKeysBlocks()
-    {
-
-    }
-
-    void testCanOverwriteExistingKeyBlocks()
-    {
-
-    }
-
-    void testCanDeleteKeysBlocks()
+    /**
+     * Tests that we can write multiple keys' blocks to disk and read them back out.
+     */
+    void testCanWriteAndReadMultipleKeysBlocks()
     {
         setup();
 
         uint32_t blockSize = 20;
         DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 30);
 
-        // write some blocks 
+        std::vector<std::string> keys;
+        std::vector<std::vector<Block>> writeBlocksList;
+        std::vector<std::vector<std::vector<unsigned char>>> writeDataBuffersList;
+
+        uint32_t M = 5;
+
+        // generate data for M keys
+        for (uint32_t i = 0; i < M; i++) 
+        {
+            std::string key = "key_" + std::to_string(i);
+            keys.push_back(key);
+
+            uint32_t N = i + 1; // Vary the number of blocks per key
+            uint32_t numBytes = N * blockSize + (i % blockSize);
+            std::vector<std::vector<unsigned char>> writeDataBuffers;
+
+            // Generate and write blocks
+            std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, blockSize, numBytes, writeDataBuffers);
+            ds.writeBlocks(key, writeBlocks);
+
+            // Store for later validation
+            writeBlocksList.push_back(writeBlocks);
+            writeDataBuffersList.push_back(std::move(writeDataBuffers));
+        }
+
+        // Instantiate new object to ensure no cached data (read from disk)
+        DiskStorage newDs = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 30);
+
+        // Read and validate data for each key
+        for (uint32_t i = 0; i < M; i++) 
+        {
+            std::cout << "/////////////////////////////////////////////////" << std::endl;
+            std::cout << "// Key " << i << std::endl;
+            std::cout << "/////////////////////////////////////////////////" << std::endl << std::endl;
+
+            std::string& key = keys[i];
+            std::vector<Block>& expectedBlocks = writeBlocksList[i];
+            std::vector<unsigned char> totalWriteBuffer = VectorUtils::flatten(writeDataBuffersList[i]);
+
+            std::cout << "Expected blocks: " << std::endl << std::endl;
+            for (auto block : expectedBlocks)
+                std::cout << block.toString(true) << std::endl;
+
+            // Read blocks
+            std::vector<unsigned char> readBuffer;
+            std::vector<Block> readBlocks = newDs.readBlocks(key, readBuffer);
+
+            std::cout << "Read blocks: " << std::endl << std::endl;
+            for (auto block : readBlocks)
+                std::cout << block.toString(true) << std::endl;
+
+            // Validate size and content
+            assert(expectedBlocks.size() == readBlocks.size());
+            for (uint32_t j = 0; j < expectedBlocks.size(); j++) 
+            {
+                assert(expectedBlocks[j].equals(readBlocks[j]));
+            }
+
+            assert(totalWriteBuffer == readBuffer);
+        }
+
+        std::cerr << "Test: " << __FUNCTION__ << " - SUCCESS" << std::endl;
+
+        std::cout << newDs.header.toString() << std::endl;
+        std::cout << newDs.bat.toString() << std::endl;
+
+        teardown();
+    }
+
+    void testCanDeleteOneKeysBlocks()
+    {
+        setup();
+
+        uint32_t blockSize = 20;
+        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 30);
+
+        // write some blocks
         std::string key = "archive.zip";
         uint32_t N = 2;
-        uint32_t numBytes = N * blockSize + 10;
+        uint32_t extraBytes = 10;
+        uint32_t numBytes = N * blockSize + extraBytes;
         std::vector<std::vector<unsigned char>> writeDataBuffers;
+
         std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, blockSize, numBytes, writeDataBuffers);
         ds.writeBlocks(key, writeBlocks);
-
-        std::cout << ds.bat.toString() << std::endl;
-        std::cout << ds.freeSpaceMap.toString() << std::endl;
-        std::vector<unsigned char> oldRawData = ds.readRawDiskBlocks(0, N+1);
-        PrintUtils::printVector(oldRawData);
+        
+        // should have written (N + 1) blocks, starting at blockNum = 0
+        for (int i = 0; i < N + 1; i++)
+            assert(ds.freeSpaceMap.isMapped(i));
+        assert(ds.bat.numEntries == 1);
 
         // delete blocks
         ds.deleteBlocks(key);
 
-        std::cout << ds.bat.toString() << std::endl;
-        std::cout << ds.freeSpaceMap.toString() << std::endl;
-        std::vector<unsigned char> newRawData = ds.readRawDiskBlocks(0, N+1);
-        PrintUtils::printVector(newRawData);
+        // first (N + 1) blocks should now be free
+        for (int i = 0; i < N + 1; i++)
+            assert(!ds.freeSpaceMap.isMapped(i));
+
+        assert(ds.bat.numEntries == 0 && ds.bat.table.size() == 0);
+
+        std::cerr << "Test: " << __FUNCTION__ << " - " << "SUCCESS" << std::endl;
 
         teardown();
+    }
+
+    void testCanOverwriteExistingKey()
+    {
+        setup();
+
+        uint32_t blockSize = 20;
+        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 30);
+
+        std::string key = "archive.zip";
+        uint32_t N = 5;
+        uint32_t numBytes = N * blockSize;
+        std::vector<std::vector<unsigned char>> writeDataBuffers;
+
+        // write N blocks
+        std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, blockSize, numBytes, writeDataBuffers);
+        ds.writeBlocks(key, writeBlocks);
+
+        auto entry = ds.bat.findBATEntry(Crypto::sha256_32(key));
+
+        // ensure blocks were correctly written
+        assert((*entry)->numBytes == numBytes);
+        for (int i = 0; i < N; i++)
+            assert(ds.freeSpaceMap.isMapped(i));
+        
+        // overwrite with M < N blocks
+        uint32_t M = N - 2;
+        numBytes = M * blockSize;
+        writeDataBuffers.clear();
+        writeBlocks = BlockUtils::generateNRandom(key, M, blockSize, numBytes, writeDataBuffers);
+        ds.writeBlocks(key, writeBlocks);
+
+        entry = ds.bat.findBATEntry(Crypto::sha256_32(key));
+
+        // ensure didn't write a new entry (i.e. ensure we overwrote the old entry)
+        assert(ds.bat.numEntries == 1);
+        assert((*entry)->keyHash == Crypto::sha256_32(key));
+
+        // ensure new blocks were correctly written
+        assert((*entry)->numBytes == numBytes);
+        for (int i = 0; i < M; i++)
+            assert(ds.freeSpaceMap.isMapped(i));
+        
+        // ensure old blocks were de-allocated
+        for (int i = M; i < N; i++)
+            assert(!ds.freeSpaceMap.isMapped(i));
+        
+        std::cerr << "Test: " << __FUNCTION__ << " - " << "SUCCESS" << std::endl;
+        
+        teardown();
+    }
+
+    void testFragmentedWrite()
+    {
+        setup();
+
+        uint32_t blockSize = 20;
+        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 30);
+
+        std::string key1 = "archive.zip";
+        uint32_t N = 3;
+        uint32_t numBytes = N * blockSize;
+        std::vector<std::vector<unsigned char>> writeDataBuffers;
+
+        // write N blocks for first key
+        std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key1, N, blockSize, numBytes, writeDataBuffers);
+        ds.writeBlocks(key1, writeBlocks);
+
+        // write M blocks for second key (doesn't really matter how many)
+        std::string key2 = "video.mp4";
+        uint32_t M = 5;
+        numBytes = M * blockSize;
+        writeDataBuffers.clear();
+        writeBlocks = BlockUtils::generateNRandom(key2, M, blockSize, numBytes, writeDataBuffers);
+        ds.writeBlocks(key2, writeBlocks);
+
+        // delete first key (i.e. free first N blocks)
+        ds.deleteBlocks(key1);
+
+        // write (N + 1) blocks for third key
+        // i.e. should skip first free N blocks, and write starting after key2's blocks
+        std::string key3 = "shakespeare.txt";
+        numBytes = (N + 1) * blockSize;
+        writeDataBuffers.clear();
+        writeBlocks = BlockUtils::generateNRandom(key3, (N + 1), blockSize, numBytes, writeDataBuffers);
+        ds.writeBlocks(key3, writeBlocks);
+
+        // ensure `key1`s blocks are unmapped
+        for (int i = 0; i < N; i++)
+            assert(!ds.freeSpaceMap.isMapped(i));
+
+        // ensure `key2`s and `key3`s blocks are mapped
+        for (int i = N; i < N + M + (N + 1); i++)
+            assert(ds.freeSpaceMap.isMapped(i));
+
+        // ensure `key3`s blocks start at block N + M
+        auto entry = ds.bat.findBATEntry(Crypto::sha256_32(key3));
+        assert((*entry)->startingDiskBlockNum == N + M);
+
+        std::cerr << "Test: " << __FUNCTION__ << " - " << "SUCCESS" << std::endl;
+
+        teardown();
+    }
+
+    void testMaxBlocksReached()
+    {
+        setup();
+
+        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, 4096, 1u << 20);
+
+        /**
+         * 1MB max data size (2^20), 4KB block size (2^12) -> 256 (2^8) blocks
+         */
+        uint32_t maxNumBlocks = ds.getNumBlocks(ds.maxDataSize);
+        assert(maxNumBlocks == 256);
+
+        std::cerr << "Test: " << __FUNCTION__ << " - " << "SUCCESS" << std::endl;
+    }
+
+    void runAll()
+    {
+        std::cerr << "###################################" << std::endl;
+        std::cerr << "DiskStorageTests" << std::endl;
+        std::cerr << "###################################" << std::endl;
+
+        testCanWriteAndReadNewHeaderAndBat();
+        testCanWriteAndReadOneKeysBlocks();
+        testCanWriteAndReadMultipleKeysBlocks();
+        testCanOverwriteExistingKey();
+        testFragmentedWrite();
+        testMaxBlocksReached();
     }
 }
 
 int main()
 {
-    // DiskStorageTests::testCanWriteAndReadNewHeaderAndBat();
-    // DiskStorageTests::testCanWriteAndReadBlocksOneKey();
-    DiskStorageTests::testCanDeleteKeysBlocks();
+    DiskStorageTests::runAll();
 
     // FreeSpaceMapTests::testFreeNBlocks();
     // FreeSpaceMapTests::testAllocateNBlocks();

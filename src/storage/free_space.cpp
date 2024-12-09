@@ -67,26 +67,16 @@ std::optional<uint32_t> FreeSpaceMap::findNFreeBlocks(uint32_t N)
     }
 
     // no contiguous section found
-    std::cout << "No contiguous section of " << N << " blocks available" << std::endl;
     return std::nullopt;
 }
 
 /**
- * Finds `N` contiguous free blocks and allocates them.
- * 
- * Returns the starting block number.
+ * Allocates `N` contiguous blocks starting at block `startBlockNum`.
  */
 std::optional<uint32_t> FreeSpaceMap::allocateNBlocks(uint32_t startBlockNum, uint32_t N)
 {
     if (N < 1)
         return std::nullopt;
-
-    // // find contiguous section of `N` free blocks
-    // auto alloc = findNFreeBlocks(N);
-    // if (alloc == std::nullopt) 
-    //     return std::nullopt;
-
-    // uint32_t startBlockNum = *alloc;
 
     uint32_t index = startBlockNum / 8; // byte index
     uint32_t pos = startBlockNum % 8;   // position in byte
@@ -146,6 +136,27 @@ void FreeSpaceMap::freeNBlocks(uint32_t startBlockNum, uint32_t N)
     {
         freeBitsInByte(index, 0, N);
     }
+}
+
+/**
+ * Returns true if the repective blockCapacity's and bit maps 
+ * are equal, false otherwise.
+ */
+bool FreeSpaceMap::equals(FreeSpaceMap other)
+{
+    if (blockCapacity != other.blockCapacity)
+        return false;
+    
+    if (bitMap.size() != other.bitMap.size())
+        return false;
+    
+    for (int i = 0; i < bitMap.size(); i++)
+    {
+        if (bitMap[i] != other.bitMap[i])
+            return false;
+    }
+
+    return true;
 }
 
 /**
