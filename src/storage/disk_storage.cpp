@@ -348,7 +348,7 @@ public:
             this->storeFile.close();
         }
         else
-            throw std::runtime_error("Failed to open file for reading!");
+            throw std::runtime_error("failed to open file for reading!");
         
         return buffer;
     }
@@ -368,7 +368,7 @@ public:
         // find BAT entry of `key`
         auto entry = this->bat.findBATEntry(Crypto::sha256_32(key));
         if (entry == std::nullopt)
-            throw std::runtime_error("No BAT entry found for given key: " + key);
+            throw std::runtime_error("readBlocks() - no BAT entry found for given key: " + key);
 
         auto batEntry = *entry;
 
@@ -385,13 +385,17 @@ public:
         {
             this->storeFile.seekg(offset);
             this->storeFile.read(reinterpret_cast<char*>(readBuffer.data()), numBytes);
+
+            if (this->storeFile.fail() || this->storeFile.bad())
+                throw std::runtime_error("readBlocks() - bad read of cumulative block data from disk");
+
             this->storeFile.close();
         }
         else
-            throw std::runtime_error("Failed to open file for reading!");
+            throw std::runtime_error("failed to open file for reading!");
         
         if (readBuffer.size() != numBytes)
-            throw std::runtime_error("Buffer size != on-disk size");
+            throw std::runtime_error("readBlocks() - read buffer size != on-disk size");
         
         /**
          * Populate Block objects from the buffer.
@@ -434,6 +438,9 @@ public:
      */
     void writeBlocks(std::string key, std::vector<Block> dataBlocks)
     {
+        if (dataBlocks.size() == 0)
+            throw std::runtime_error("writeBlocks() - no data blocks given");
+
         auto entry = this->bat.findBATEntry(Crypto::sha256_32(key));
 
         /**
@@ -468,7 +475,7 @@ public:
         uint32_t N = dataBlocks.size();
         auto alloc = freeSpaceMap.findNFreeBlocks(N);
         if (alloc == std::nullopt)
-            throw std::runtime_error("No contiguous section of " + std::to_string(N) + " blocks found");
+            throw std::runtime_error("writeBlocks() - no contiguous section of " + std::to_string(N) + " blocks found");
 
         /**
          * Copy all block data into a single buffer (which we later write out to disk).
@@ -488,7 +495,7 @@ public:
         if (buffer.size() != numBytes)
         {
             restoreFreedBlocks();
-            throw std::runtime_error("Bad copy of data blocks to output buffer");
+            throw std::runtime_error("writeBlocks() - bad copy of data blocks to output buffer");
         }
             
         // write buffer out to disk
@@ -504,7 +511,7 @@ public:
             if (this->storeFile.fail() || this->storeFile.bad())
             {
                 restoreFreedBlocks();
-                throw std::runtime_error("Bad write of cumulative block data to disk");
+                throw std::runtime_error("writeBlocks() - bad write of cumulative block data to disk");
             }
                 
             this->storeFile.close();
@@ -512,7 +519,7 @@ public:
         else
         {
             restoreFreedBlocks();
-            throw std::runtime_error("Failed to open file for writing!");
+            throw std::runtime_error("failed to open file for writing!");
         }
 
         // allocate new blocks
@@ -553,7 +560,7 @@ public:
         // find `key`s BAT entry
         auto entry = this->bat.findBATEntry(Crypto::sha256_32(key));
         if (entry == std::nullopt)
-            throw std::runtime_error("No BAT entry exists for key: " + key);
+            throw std::runtime_error("deleteBlocks() - no BAT entry exists for key: " + key);
         
         auto batEntry = *entry;
 
@@ -591,12 +598,12 @@ public:
         // remove store file
         if (!fs::remove(storeFilePath))
             throw std::runtime_error(
-                "File couldn't be removed: " + storeFilePath.string());
+                "file couldn't be removed: " + storeFilePath.string());
         
         // remove store dir
         if (!fs::remove(storeDirPath))
             throw std::runtime_error(
-                "Directory couldn't be removed: " + storeFilePath.string());
+                "directory couldn't be removed: " + storeFilePath.string());
     }
 
 private:
@@ -696,7 +703,7 @@ private:
             std::fstream::in | std::fstream::out | std::fstream::trunc | std::fstream::binary);
 
         if (!this->storeFile.is_open())
-            throw std::runtime_error("Couldn't create store file");
+            throw std::runtime_error("couldn't create store file");
 
         std::cout << "Created store file: " << this->storeFilePath << std::endl;
 
@@ -725,8 +732,6 @@ namespace DiskStorageTests
         // remove store created during current test
         DiskStorage::removeStoreFileAndDirectory(fs::path("rackkey"), "store");
     }
-
-
 
     void testCanWriteAndReadNewHeaderAndBat()
     {
@@ -792,7 +797,7 @@ namespace DiskStorageTests
         if (writeBlocks.size() != readBlocks.size())
         {
             throw std::runtime_error(
-                ("Write and read block lists not same size: " +
+                ("write and read block lists not same size: " +
                   std::to_string(writeBlocks.size()) +
                   std::to_string(readBlocks.size()))
             );
@@ -1034,7 +1039,63 @@ namespace DiskStorageTests
         uint32_t maxNumBlocks = ds.getNumBlocks(ds.maxDataSize);
         assert(maxNumBlocks == 256);
 
+        // should successfully write N blocks
+        std::string key = "archive.zip";
+        uint32_t N = 230;
+        uint32_t numBytes = N * ds.diskBlockSize;
+        std::vector<std::vector<unsigned char>> writeDataBuffers;
+
+        std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, ds.diskBlockSize, numBytes, writeDataBuffers);
+        ds.writeBlocks(key, writeBlocks);
+
+        auto entry = ds.bat.findBATEntry(Crypto::sha256_32(key));
+        auto batEntry = *entry;
+
+        // ensure first write was valid
+        assert(batEntry->startingDiskBlockNum == 0);
+        assert(batEntry->numBytes == numBytes);
+        for (int i = 0; i < N; i++)
+            assert(ds.freeSpaceMap.isMapped(i));
+
+        // should fail to write 1 more block than is available
+        std::string newKey = "video.mp4";
+        uint32_t newN = (maxNumBlocks - N) + 1;
+        uint32_t newNumBytes = newN * ds.diskBlockSize;
+        writeDataBuffers.clear();
+
+        writeBlocks = BlockUtils::generateNRandom(newKey, newN, ds.diskBlockSize, newNumBytes, writeDataBuffers);
+        try 
+        {
+            ds.writeBlocks(newKey, writeBlocks);
+            
+            // shouldn't reach this point - investigate
+            std::cout << ds.bat.toString() << std::endl;
+            std::cout << ds.freeSpaceMap.toString() << std::endl;
+
+            std::cerr << "Test: " << __FUNCTION__ << " - " << "FAILED" << std::endl;
+            return;
+        }
+        catch (std::runtime_error& e)
+        {
+            std::cout << e.what() << std::endl;
+        }
+
+        // ensure disk state has been maintained
+        assert(batEntry->startingDiskBlockNum == 0);
+        assert(batEntry->numBytes == numBytes);
+        for (int i = 0; i < N; i++)
+            assert(ds.freeSpaceMap.isMapped(i));
+
         std::cerr << "Test: " << __FUNCTION__ << " - " << "SUCCESS" << std::endl;
+    }
+
+    /**
+     * Testing that, on a failed write, we restore the
+     * old, valid disk state.
+     */
+    void testRestoreDiskStateOnFailedWrite()
+    {
+
     }
 
     void runAll()
@@ -1049,6 +1110,7 @@ namespace DiskStorageTests
         testCanOverwriteExistingKey();
         testFragmentedWrite();
         testMaxBlocksReached();
+        testRestoreDiskStateOnFailedWrite();
     }
 }
 
@@ -1064,13 +1126,28 @@ int main()
 
 /*
 Immediate todo:
-    - deleteBlocks()
+    - helper function for opening and closing the file 
     - checks in server.cpp that:
         - blocks are in correct order (disk_storage presumes they are)
         - first (blockNum - 1) blocks are full
     - have a go at using it to save blocks and retreive them
     - handle hash collisions:
         - heh?
+    - handle concurrent r/w of storeFile (below)
+
+Maybe:
+    - handle concurrent r/w
+        - i.e. use locks to prevent multiple threads
+          r/w store file at same time
+        - master may have multiple threads call same node
+          concurrently, in which case multiple storage server
+          threads will access same DiskStorage simultaneously
+        - can probably just lock the entire DiskStorage for now
+        - better approach:
+            - when read, obtain a shared lock 
+                - wait for any exclusive lock
+            - when write, obtain an exclusive lock
+                - wait for any exclusive AND shared lock
     
 General cleanup:
     - make helper method for opening and closing store file
