@@ -11,6 +11,8 @@ using namespace web;
 using namespace web::http;
 using namespace web::http::experimental::listener;
 
+namespace fs = std::filesystem;
+
 namespace ApiUtils {
 
     /**
@@ -79,4 +81,13 @@ namespace MathUtils
 namespace VectorUtils
 {
     std::vector<unsigned char> flatten(std::vector<std::vector<unsigned char>>& vecs);
+}
+
+namespace FileSystemUtils
+{
+    /**
+     * Remove all contents of given directory, and the 
+     * directory itself.
+     */
+    void removeDirectory(fs::path dirPath);
 }

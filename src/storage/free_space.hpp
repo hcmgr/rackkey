@@ -22,9 +22,30 @@ public:
     std::vector<uint8_t> bitMap;
 
     /**
-     * Default constructor
+     * Default constructor - allocates a map with 0 block capacity.
+     * 
+     * NOTE:
+     * 
+     * Call initialise() to create a new map with non-zero block capacity.
+     */
+    FreeSpaceMap();
+
+    /**
+     * Param. constructor - allocates a map with `blockCapacity` capacity.
+     * 
+     * NOTE:
+     * 
+     * Equivalent to calling:
+     *      FreeSpaceMap fsm;
+     *      fsm.initialise(N); // for some arbitrary N
      */
     FreeSpaceMap(uint32_t blockCapacity);
+
+    /**
+     * Initialises a fresh free space map with capacity to hold
+     * `blockCapacity` blocks.
+     */
+    void initialise(uint32_t blockCapacity);
 
     /**
      * Finds `N` contiguous free blocks and returns the 

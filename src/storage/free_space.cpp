@@ -12,11 +12,39 @@
 ////////////////////////////////////////////
 
 /**
- * Default constructor
+ * Default constructor - allocates a map with 0 block capacity.
+ * 
+ * NOTE:
+ * 
+ * Call initialise() to create a new map with non-zero block capacity.
+ */
+FreeSpaceMap::FreeSpaceMap()
+    : blockCapacity(0)
+{
+}
+
+/**
+ * Param. constructor - allocates a map with `blockCapacity` capacity.
+ * 
+ * NOTE:
+ * 
+ * Equivalent to calling:
+ *      FreeSpaceMap fsm;
+ *      fsm.initialise(N); // for some arbitrary N
  */
 FreeSpaceMap::FreeSpaceMap(uint32_t blockCapacity)
-    : blockCapacity(blockCapacity)
 {
+    initialise(blockCapacity);
+}
+
+/**
+ * Initialises the free space map with capacity to hold
+ * `blockCapacity` blocks.
+ */
+void FreeSpaceMap::initialise(uint32_t blockCapacity)
+{
+    this->blockCapacity = blockCapacity;
+
     int numEntries = MathUtils::ceilDiv(blockCapacity, 8);
     this->bitMap = std::vector<uint8_t>(numEntries, 0);
 }
@@ -229,7 +257,8 @@ namespace FreeSpaceMapTests
     void testFreeNBlocks()
     {
         uint32_t blockCapacity = 32;
-        FreeSpaceMap fsm(blockCapacity);
+        FreeSpaceMap fsm;
+        fsm.initialise(blockCapacity);
 
         // allocate N blocks, starting at block 0
         uint32_t N = 26;

@@ -179,9 +179,8 @@ struct BAT
 class DiskStorage
 {
 public:
-    uint32_t magicNumber;
-    uint32_t diskBlockSize;
-    uint32_t maxDataSize;
+    /* Identifies our store file */
+    const uint32_t magicNumber = 0xABABABAB;
 
     /* File header */
     Header header;
@@ -198,63 +197,37 @@ public:
     DiskStorage(
         std::string storeDirPath = "rackkey",
         std::string storeFileName = "store",
-        uint32_t magicNumber = 0xABABABAB,
         uint32_t diskBlockSize = 4096,
         uint32_t maxDataSize = 1u << 30
     )
         : storeDirPath(fs::path(storeDirPath)),
-          storeFileName(storeFileName),
-          magicNumber(magicNumber),
-          diskBlockSize(diskBlockSize),
-          maxDataSize(maxDataSize),
-          freeSpaceMap(getNumDiskBlocks(maxDataSize))
+          storeFileName(storeFileName)
     {
         this->storeFilePath = this->storeDirPath / this->storeFileName;
 
         // initialise from existing store file
-        if (storeFileExists())
+        if (fs::exists(this->storeFilePath))
         {
             std::cout << "Reading from existing store file: " << this->storeFilePath << std::endl;
 
             readHeader();
             readBAT();
+            freeSpaceMap.initialise(getNumDiskBlocks(maxDataSize));
             populateFreeSpaceMapFromFile();
         }
 
         // create new store file
-        else {
-            initialiseHeader();
+        else 
+        {
             createStoreFile();
+            initialiseHeader(diskBlockSize, maxDataSize);
             writeHeader();
+            freeSpaceMap.initialise(getNumDiskBlocks(maxDataSize));
         }
     }
 
     ~DiskStorage()
     {
-    }
-
-    /**
-     * Returns total size (in bytes) of the store file.
-     */
-    uint32_t getTotalFileSize()
-    {
-        return sizeof(this->header) + this->header.batSize + this->header.maxDataSize;
-    }
-
-    /**
-     * Returns offset of disk block `diskBlockNum`.
-     */
-    uint32_t getDiskBlockOffset(uint32_t diskBlockNum)
-    {
-        return this->header.blockStoreOffset + (this->header.diskBlockSize * diskBlockNum);
-    }
-
-    /**
-     * Returns number of disk blocks `numBytes` bytes takes up.
-     */
-    uint32_t getNumDiskBlocks(uint32_t numBytes)
-    {
-        return MathUtils::ceilDiv(numBytes, this->diskBlockSize);
     }
 
     /**
@@ -341,52 +314,6 @@ public:
         } else {
             std::cerr << "Failed to open file for writing BAT!" << std::endl;
         }
-    }
-
-    void populateFreeSpaceMapFromFile()
-    {
-        // ensure the free space map is already allocated to correct size
-        ASSERT_THAT(this->freeSpaceMap.blockCapacity == getNumDiskBlocks(this->maxDataSize));
-
-        /**
-         * Allocate all blocks for each entry
-         */
-        uint32_t numBatEntries = this->bat.numEntries;
-        for (int i = 0; i < numBatEntries; i++)
-        {
-            BATEntry entry = this->bat.table[i];
-            uint32_t startingBlockNum = entry.startingDiskBlockNum;
-            uint32_t numBlocks = getNumDiskBlocks(entry.numBytes);
-
-            this->freeSpaceMap.allocateNBlocks(startingBlockNum, numBlocks);
-        }
-    }
-
-    /**
-     * Reads `N` raw disk blocks into a buffer, starting at block `startingBlockNum`.
-     * 
-     * NOTE: used for debugging purposes mostly; such 
-     *       buffers can be printed nicely using
-     *       PrintUtils::printVector() (see utils.hpp)
-     */
-    std::vector<unsigned char> readRawDiskBlocks(uint32_t startingDiskBlockNum, uint32_t N)
-    {
-        uint32_t numBytes = N * this->header.diskBlockSize;
-        uint32_t offset = getDiskBlockOffset(startingDiskBlockNum);
-
-        std::vector<unsigned char> buffer(numBytes);
-
-        this->storeFile.open(storeFilePath, std::fstream::in | std::fstream::out);
-        if (this->storeFile.is_open())
-        {
-            this->storeFile.seekg(offset);
-            this->storeFile.read(reinterpret_cast<char*>(buffer.data()), numBytes);
-            this->storeFile.close();
-        }
-        else
-            throw std::runtime_error("failed to open file for reading!");
-        
-        return buffer;
     }
 
     /**
@@ -591,6 +518,9 @@ public:
         writeBAT();
     }
 
+    /**
+     * Deletes the BAT entry and frees the blocks of the given `key`.
+     */
     void deleteBlocks(std::string key)
     {
         // find `key`s BAT entry
@@ -619,91 +549,67 @@ public:
     }
 
     /**
-     * Deletes the current store file and directory.
+     * Reads `N` raw disk blocks into a buffer, starting at block `startingBlockNum`.
+     * 
+     * NOTE: used for debugging purposes mostly; such 
+     *       buffers can be printed nicely using
+     *       PrintUtils::printVector() (see utils.hpp)
      */
-    static void removeStoreFileAndDirectory(fs::path storeDirPath, std::string storeFileName)
+    std::vector<unsigned char> readRawDiskBlocks(uint32_t startingDiskBlockNum, uint32_t N)
     {
-        fs::path storeFilePath = storeDirPath / storeFileName;
+        uint32_t numBytes = N * this->header.diskBlockSize;
+        uint32_t offset = getDiskBlockOffset(startingDiskBlockNum);
 
-        if (!fs::exists(storeFilePath))
+        std::vector<unsigned char> buffer(numBytes);
+
+        this->storeFile.open(storeFilePath, std::fstream::in | std::fstream::out);
+        if (this->storeFile.is_open())
         {
-            // std::cout << "Store file to be removed does not exist: " + storeFilePath.string() << std::endl;
-            return;
+            this->storeFile.seekg(offset);
+            this->storeFile.read(reinterpret_cast<char*>(buffer.data()), numBytes);
+            this->storeFile.close();
         }
-
-        // remove store file
-        if (!fs::remove(storeFilePath))
-            throw std::runtime_error(
-                "file couldn't be removed: " + storeFilePath.string());
+        else
+            throw std::runtime_error("failed to open file for reading!");
         
-        // remove store dir
-        if (!fs::remove(storeDirPath))
-            throw std::runtime_error(
-                "directory couldn't be removed: " + storeFilePath.string());
+        return buffer;
+    }
+
+    /**
+     * Returns total size (in bytes) of the store file.
+     */
+    uint32_t getTotalFileSize()
+    {
+        return sizeof(this->header) + this->header.batSize + this->header.maxDataSize;
+    }
+
+    /**
+     * Returns offset of disk block `diskBlockNum`.
+     */
+    uint32_t getDiskBlockOffset(uint32_t diskBlockNum)
+    {
+        return this->header.blockStoreOffset + (this->header.diskBlockSize * diskBlockNum);
+    }
+
+    /**
+     * Returns number of disk blocks `numBytes` bytes takes up.
+     */
+    uint32_t getNumDiskBlocks(uint32_t numBytes)
+    {
+        return MathUtils::ceilDiv(numBytes, this->header.diskBlockSize);
     }
 
 private:
+    /**
+     * TODO:
+     *  
+     * remove unecessary variables here
+     */
     fs::path storeDirPath;
     std::string storeFileName;
-
     fs::path storeFilePath;
+
     std::fstream storeFile;
-
-
-
-    /**
-     * Initialises the header.
-     * 
-     * NOTE: 
-     * 
-     * We don't write out to disk yet, as we must ensure the store file has been
-     * created.
-     */
-    void initialiseHeader()
-    {
-        uint32_t batOffset = sizeof(Header);
-        uint32_t numBlocks = getNumDiskBlocks(this->maxDataSize);
-        uint32_t batSize = sizeof(uint32_t) + (numBlocks * sizeof(BATEntry));
-        uint32_t blockStoreOffset = sizeof(Header) + batSize;
-
-        this->header = Header(
-            this->magicNumber, 
-            batOffset, 
-            batSize,
-            this->diskBlockSize, 
-            this->maxDataSize, 
-            blockStoreOffset
-        );
-    }
-
-    /**
-     * Returns true if the local copy of the header is valid, false otherwise.
-     */
-    bool headerValid()
-    {
-        return this->header.magicNumber == this->magicNumber;
-    }
-
-    /**
-     * Returns true if the store directory and store file validly exist, false otherwise
-     */
-    bool storeFileExists()
-    {
-        // check store directory exists
-        if (!(fs::exists(this->storeDirPath) && fs::is_directory(this->storeDirPath)))
-        {
-            std::cout << "Store directory does not exist: " << this->storeDirPath << std::endl;
-            return false;
-        }
-
-        // check store file exists
-        if (!fs::exists(this->storeFilePath))
-        {
-            std::cout << "Store file does not exist: " << this->storeFilePath << std::endl;
-            return false;
-        }
-        return true;
-    }
 
     /**
      * Creates a new store file in a new store directory.
@@ -739,6 +645,53 @@ private:
         this->storeFile.flush();
         this->storeFile.close();
     }
+
+    /**
+     * Initialises the file header.
+     */
+    void initialiseHeader(uint32_t diskBlockSize, uint32_t maxDataSize)
+    {
+        uint32_t batOffset = sizeof(Header);
+        uint32_t numBlocks = MathUtils::ceilDiv(maxDataSize, diskBlockSize);
+        uint32_t batSize = sizeof(uint32_t) + (numBlocks * sizeof(BATEntry));
+        uint32_t blockStoreOffset = sizeof(Header) + batSize;
+
+        this->header = Header(
+            this->magicNumber, 
+            batOffset, 
+            batSize,
+            diskBlockSize, 
+            maxDataSize, 
+            blockStoreOffset
+        );
+    }
+
+    void populateFreeSpaceMapFromFile()
+    {
+        // ensure the free space map is already allocated to correct size
+        ASSERT_THAT(this->freeSpaceMap.blockCapacity == getNumDiskBlocks(this->header.maxDataSize));
+
+        /**
+         * Allocate all blocks for each entry
+         */
+        uint32_t numBatEntries = this->bat.numEntries;
+        for (int i = 0; i < numBatEntries; i++)
+        {
+            BATEntry entry = this->bat.table[i];
+            uint32_t startingBlockNum = entry.startingDiskBlockNum;
+            uint32_t numBlocks = getNumDiskBlocks(entry.numBytes);
+
+            this->freeSpaceMap.allocateNBlocks(startingBlockNum, numBlocks);
+        }
+    }
+
+    /**
+     * Returns true if the local copy of the header is valid, false otherwise.
+     */
+    bool headerValid()
+    {
+        return this->header.magicNumber == this->magicNumber;
+    }
 };
 
 ////////////////////////////////////////////
@@ -749,13 +702,13 @@ namespace DiskStorageTests
     void setup()
     {
         // remove existing store of a previous test
-        DiskStorage::removeStoreFileAndDirectory(fs::path("rackkey"), "store");
+        FileSystemUtils::removeDirectory(fs::path("rackkey"));
     }
 
     void teardown()
     {
         // remove store created during current test
-        DiskStorage::removeStoreFileAndDirectory(fs::path("rackkey"), "store");
+        FileSystemUtils::removeDirectory(fs::path("rackkey"));
     }
 
     void testCanWriteAndReadNewHeaderAndBat()
@@ -763,7 +716,8 @@ namespace DiskStorageTests
         setup();
 
         // implictly creates and writes header
-        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, 4192, 1u << 30);
+        DiskStorage ds = DiskStorage("rackkey", "store", 4096, 1u << 30);
+        std::cout << ds.header.toString() << std::endl;
 
         // create and write BAT
         int N = 3;
@@ -779,7 +733,7 @@ namespace DiskStorageTests
         BAT oldBat = ds.bat;
 
         // instantiate new object so don't have header or BAT cached (i.e. must read from disk)
-        DiskStorage newDs = DiskStorage("rackkey", "store", 0xABABABAB, 4192, 1u << 30);
+        DiskStorage newDs = DiskStorage("rackkey", "store", 4096, 1u << 30);
 
         Header newHeader = newDs.header;
         BAT newBat = ds.bat;
@@ -798,7 +752,7 @@ namespace DiskStorageTests
         setup();
 
         uint32_t blockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 30);
+        DiskStorage ds = DiskStorage("rackkey", "store", blockSize, 1u << 30);
 
         std::string key = "archive.zip";
         uint32_t N = 2;
@@ -810,7 +764,7 @@ namespace DiskStorageTests
         ds.writeBlocks(key, writeBlocks);
 
         // instantiate new object so don't have header, bat or file stream cached (i.e. must read from disk)
-        DiskStorage newDs = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 30);
+        DiskStorage newDs = DiskStorage("rackkey", "store", blockSize, 1u << 30);
 
         // read blocks
         std::vector<unsigned char> readBuffer;
@@ -839,7 +793,7 @@ namespace DiskStorageTests
         setup();
 
         uint32_t blockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 30);
+        DiskStorage ds = DiskStorage("rackkey", "store", blockSize, 1u << 30);
 
         std::vector<std::string> keys;
         std::vector<std::vector<Block>> writeBlocksList;
@@ -867,7 +821,7 @@ namespace DiskStorageTests
         }
 
         // Instantiate new object to ensure no cached data (read from disk)
-        DiskStorage newDs = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 30);
+        DiskStorage newDs = DiskStorage("rackkey", "store", blockSize, 1u << 30);
 
         // Read and validate data for each key
         for (uint32_t i = 0; i < M; i++) 
@@ -913,7 +867,7 @@ namespace DiskStorageTests
         setup();
 
         uint32_t blockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 30);
+        DiskStorage ds = DiskStorage("rackkey", "store", blockSize, 1u << 30);
 
         // write some blocks
         std::string key = "archive.zip";
@@ -947,7 +901,7 @@ namespace DiskStorageTests
         setup();
 
         uint32_t blockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 10);
+        DiskStorage ds = DiskStorage("rackkey", "store", blockSize, 1u << 10);
 
         // write some blocks
         std::string key = "archive.zip";
@@ -969,11 +923,11 @@ namespace DiskStorageTests
         std::cout << ds.freeSpaceMap.toString() << std::endl;
 
         // create a new DiskStorage object - to force an initialisation from file
-        DiskStorage newDs = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 10);
+        DiskStorage newDs = DiskStorage("rackkey", "store", blockSize, 1u << 10);
 
         std::cout << newDs.freeSpaceMap.toString() << std::endl;
 
-        ASSERT_THAT(newDs.freeSpaceMap.blockCapacity == newDs.getNumDiskBlocks(newDs.maxDataSize));
+        ASSERT_THAT(newDs.freeSpaceMap.blockCapacity == newDs.getNumDiskBlocks(newDs.header.maxDataSize));
         for (int i = 0; i < N + newN; i++)
             ASSERT_THAT(newDs.freeSpaceMap.isMapped(i));
         for (int i = N + newN; i < newDs.freeSpaceMap.blockCapacity; i++)
@@ -987,7 +941,7 @@ namespace DiskStorageTests
         setup();
 
         uint32_t blockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 30);
+        DiskStorage ds = DiskStorage("rackkey", "store", blockSize, 1u << 30);
 
         std::string key = "archive.zip";
         uint32_t N = 5;
@@ -1035,7 +989,7 @@ namespace DiskStorageTests
         setup();
 
         uint32_t blockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 30);
+        DiskStorage ds = DiskStorage("rackkey", "store", blockSize, 1u << 30);
 
         std::string key1 = "archive.zip";
         uint32_t N = 3;
@@ -1084,21 +1038,21 @@ namespace DiskStorageTests
     {
         setup();
 
-        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, 4096, 1u << 20);
+        DiskStorage ds = DiskStorage("rackkey", "store", 4096, 1u << 20);
 
         /**
          * 1MB max data size (2^20), 4KB block size (2^12) -> 256 (2^8) blocks
          */
-        uint32_t maxNumBlocks = ds.getNumDiskBlocks(ds.maxDataSize);
+        uint32_t maxNumBlocks = ds.getNumDiskBlocks(ds.header.maxDataSize);
         ASSERT_THAT(maxNumBlocks == 256);
 
         // should successfully write N blocks
         std::string key = "archive.zip";
         uint32_t N = 230;
-        uint32_t numBytes = N * ds.diskBlockSize;
+        uint32_t numBytes = N * ds.header.diskBlockSize;
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
-        std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, ds.diskBlockSize, numBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, ds.header.diskBlockSize, numBytes, writeDataBuffers);
         ds.writeBlocks(key, writeBlocks);
 
         auto entry = ds.bat.findBATEntry(Crypto::sha256_32(key));
@@ -1113,10 +1067,10 @@ namespace DiskStorageTests
         // should fail to write 1 more block than is available
         std::string newKey = "video.mp4";
         uint32_t newN = (maxNumBlocks - N) + 1;
-        uint32_t newNumBytes = newN * ds.diskBlockSize;
+        uint32_t newNumBytes = newN * ds.header.diskBlockSize;
         writeDataBuffers.clear();
 
-        writeBlocks = BlockUtils::generateNRandom(newKey, newN, ds.diskBlockSize, newNumBytes, writeDataBuffers);
+        writeBlocks = BlockUtils::generateNRandom(newKey, newN, ds.header.diskBlockSize, newNumBytes, writeDataBuffers);
         try 
         {
             ds.writeBlocks(newKey, writeBlocks);
@@ -1155,15 +1109,15 @@ namespace DiskStorageTests
     {
         setup();
 
-        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, 4096, 1u << 20);
+        DiskStorage ds = DiskStorage("rackkey", "store", 4096, 1u << 20);
 
         // should successfully write N blocks
         std::string key = "archive.zip";
         uint32_t N = 10;
-        uint32_t numBytes = N * ds.diskBlockSize;
+        uint32_t numBytes = N * ds.header.diskBlockSize;
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
-        std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, ds.diskBlockSize, numBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, ds.header.diskBlockSize, numBytes, writeDataBuffers);
         ds.writeBlocks(key, writeBlocks);
 
         // ensure first write was valid
@@ -1176,9 +1130,9 @@ namespace DiskStorageTests
 
         // construct an intentionally broken Block object
         uint32_t newN = 1;
-        uint32_t newNumBytes = N * ds.diskBlockSize;
+        uint32_t newNumBytes = N * ds.header.diskBlockSize;
         writeDataBuffers.clear();
-        writeBlocks = BlockUtils::generateNRandom(key, newN, ds.diskBlockSize, newNumBytes, writeDataBuffers);
+        writeBlocks = BlockUtils::generateNRandom(key, newN, ds.header.diskBlockSize, newNumBytes, writeDataBuffers);
 
         /**
          * Setting dataSize to 0 when underlying data is non-zero size
@@ -1224,7 +1178,7 @@ namespace DiskStorageTests
             TEST(testCanOverwriteExistingKey),
             TEST(testFragmentedWrite),
             TEST(testMaxBlocksReached),
-            TEST(testRestoreDiskStateOnFailedWrite),
+            TEST(testRestoreDiskStateOnFailedWrite)
         };
 
         for (auto &[name, func] : tests)
@@ -1244,10 +1198,6 @@ int main()
 
 /*
 Immediate todo:
-    - turn FreeSpaceMap tests into real tests with ASSERT_THAT calls
-    - header needs to be properly initialised from a file
-        - i.e. magicNumber, blockSize and maxData size shouldn't
-          even have class members  -> should just call from the header
     - have a go at using it to save blocks and retreive them
         - do we need to save blockNums in the data section as well?
     - helper function for opening and closing the file 

@@ -6,6 +6,8 @@
 #include <string>
 #include <iomanip>
 
+#include "utils.hpp"
+
 using namespace web;
 using namespace web::http;
 using namespace web::http::experimental::listener;
@@ -77,5 +79,18 @@ namespace VectorUtils
             result.insert(result.end(), vec.begin(), vec.end());
         }
         return result;
+    }
+}
+
+namespace FileSystemUtils
+{
+    /**
+     * Remove all contents of given directory, and the 
+     * directory itself.
+     */
+    void removeDirectory(fs::path dirPath)
+    {
+        if (fs::exists(dirPath))
+            fs::remove_all(dirPath);
     }
 }
