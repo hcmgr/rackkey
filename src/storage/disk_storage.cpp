@@ -5,6 +5,8 @@
 #include "crypto.hpp"
 #include "free_space.hpp"
 
+#include "test_utils.hpp"
+
 namespace fs = std::filesystem;
 
 /**
@@ -205,7 +207,7 @@ public:
           magicNumber(magicNumber),
           diskBlockSize(diskBlockSize),
           maxDataSize(maxDataSize),
-          freeSpaceMap(getNumBlocks(maxDataSize))
+          freeSpaceMap(getNumDiskBlocks(maxDataSize))
     {
         this->storeFilePath = this->storeDirPath / this->storeFileName;
 
@@ -216,6 +218,7 @@ public:
 
             readHeader();
             readBAT();
+            populateFreeSpaceMapFromFile();
         }
 
         // create new store file
@@ -230,14 +233,28 @@ public:
     {
     }
 
-    uint32_t getNumBlocks(uint32_t numBytes)
-    {
-        return MathUtils::ceilDiv(numBytes, diskBlockSize);
-    }
-
+    /**
+     * Returns total size (in bytes) of the store file.
+     */
     uint32_t getTotalFileSize()
     {
         return sizeof(this->header) + this->header.batSize + this->header.maxDataSize;
+    }
+
+    /**
+     * Returns offset of disk block `diskBlockNum`.
+     */
+    uint32_t getDiskBlockOffset(uint32_t diskBlockNum)
+    {
+        return this->header.blockStoreOffset + (this->header.diskBlockSize * diskBlockNum);
+    }
+
+    /**
+     * Returns number of disk blocks `numBytes` bytes takes up.
+     */
+    uint32_t getNumDiskBlocks(uint32_t numBytes)
+    {
+        return MathUtils::ceilDiv(numBytes, this->diskBlockSize);
     }
 
     /**
@@ -326,6 +343,25 @@ public:
         }
     }
 
+    void populateFreeSpaceMapFromFile()
+    {
+        // ensure the free space map is already allocated to correct size
+        ASSERT_THAT(this->freeSpaceMap.blockCapacity == getNumDiskBlocks(this->maxDataSize));
+
+        /**
+         * Allocate all blocks for each entry
+         */
+        uint32_t numBatEntries = this->bat.numEntries;
+        for (int i = 0; i < numBatEntries; i++)
+        {
+            BATEntry entry = this->bat.table[i];
+            uint32_t startingBlockNum = entry.startingDiskBlockNum;
+            uint32_t numBlocks = getNumDiskBlocks(entry.numBytes);
+
+            this->freeSpaceMap.allocateNBlocks(startingBlockNum, numBlocks);
+        }
+    }
+
     /**
      * Reads `N` raw disk blocks into a buffer, starting at block `startingBlockNum`.
      * 
@@ -402,7 +438,7 @@ public:
          */
         std::vector<Block> blocks;
 
-        uint32_t numBlocks = getNumBlocks(numBytes);
+        uint32_t numBlocks = getNumDiskBlocks(numBytes);
         auto bufferIterator = readBuffer.begin();
 
         for (uint32_t i = 0; i < numBlocks; i++) 
@@ -456,7 +492,7 @@ public:
             auto existingBatEntry = *entry;
 
             uint32_t oldStartingDiskBlockNum = existingBatEntry->startingDiskBlockNum;
-            uint32_t oldN = getNumBlocks(existingBatEntry->numBytes);
+            uint32_t oldN = getNumDiskBlocks(existingBatEntry->numBytes);
             freedBlocks = {oldStartingDiskBlockNum, oldN};
 
             freeSpaceMap.freeNBlocks(oldStartingDiskBlockNum, oldN);
@@ -573,7 +609,7 @@ public:
          * we can freely (pardon the pun) write over that block in the future.
          */
         uint32_t startingDiskBlockNum = batEntry->startingDiskBlockNum;
-        uint32_t N = getNumDiskBlocks(batEntry->numBytes, this->header.diskBlockSize);
+        uint32_t N = getNumDiskBlocks(batEntry->numBytes);
 
         this->freeSpaceMap.freeNBlocks(startingDiskBlockNum, N);
 
@@ -613,18 +649,7 @@ private:
     fs::path storeFilePath;
     std::fstream storeFile;
 
-    /**
-     * Returns offset of disk block `diskBlockNum`
-     */
-    uint32_t getDiskBlockOffset(uint32_t diskBlockNum)
-    {
-        return this->header.blockStoreOffset + (this->header.diskBlockSize * diskBlockNum);
-    }
 
-    uint32_t getNumDiskBlocks(uint32_t numBytes, uint32_t blockSize)
-    {
-        return MathUtils::ceilDiv(numBytes, blockSize);
-    }
 
     /**
      * Initialises the header.
@@ -637,7 +662,7 @@ private:
     void initialiseHeader()
     {
         uint32_t batOffset = sizeof(Header);
-        uint32_t numBlocks = getNumBlocks(this->maxDataSize);
+        uint32_t numBlocks = getNumDiskBlocks(this->maxDataSize);
         uint32_t batSize = sizeof(uint32_t) + (numBlocks * sizeof(BATEntry));
         uint32_t blockStoreOffset = sizeof(Header) + batSize;
 
@@ -759,10 +784,8 @@ namespace DiskStorageTests
         Header newHeader = newDs.header;
         BAT newBat = ds.bat;
 
-        assert(oldHeader.equals(newHeader));
-        assert(oldBat.equals(newBat));
-
-        std::cerr << "Test: " << __FUNCTION__ << " - " << "SUCCESS" << std::endl;
+        ASSERT_THAT(oldHeader.equals(newHeader));
+        ASSERT_THAT(oldBat.equals(newBat));
 
         teardown();
     }
@@ -803,10 +826,8 @@ namespace DiskStorageTests
             );
         }
         for (uint32_t i = 0; i < writeBlocks.size(); i++)
-            assert(writeBlocks[i].equals(readBlocks[i]));
+            ASSERT_THAT(writeBlocks[i].equals(readBlocks[i]));
         
-        std::cerr << "Test: " << __FUNCTION__ << " - " << "SUCESS" << std::endl;
-    
         teardown();
     }
 
@@ -872,16 +893,14 @@ namespace DiskStorageTests
                 std::cout << block.toString(true) << std::endl;
 
             // Validate size and content
-            assert(expectedBlocks.size() == readBlocks.size());
+            ASSERT_THAT(expectedBlocks.size() == readBlocks.size());
             for (uint32_t j = 0; j < expectedBlocks.size(); j++) 
             {
-                assert(expectedBlocks[j].equals(readBlocks[j]));
+                ASSERT_THAT(expectedBlocks[j].equals(readBlocks[j]));
             }
 
-            assert(totalWriteBuffer == readBuffer);
+            ASSERT_THAT(totalWriteBuffer == readBuffer);
         }
-
-        std::cerr << "Test: " << __FUNCTION__ << " - SUCCESS" << std::endl;
 
         std::cout << newDs.header.toString() << std::endl;
         std::cout << newDs.bat.toString() << std::endl;
@@ -908,20 +927,58 @@ namespace DiskStorageTests
         
         // should have written (N + 1) blocks, starting at blockNum = 0
         for (int i = 0; i < N + 1; i++)
-            assert(ds.freeSpaceMap.isMapped(i));
-        assert(ds.bat.numEntries == 1);
+            ASSERT_THAT(ds.freeSpaceMap.isMapped(i));
+        ASSERT_THAT(ds.bat.numEntries == 1);
 
         // delete blocks
         ds.deleteBlocks(key);
 
         // first (N + 1) blocks should now be free
         for (int i = 0; i < N + 1; i++)
-            assert(!ds.freeSpaceMap.isMapped(i));
+            ASSERT_THAT(!ds.freeSpaceMap.isMapped(i));
 
-        assert(ds.bat.numEntries == 0 && ds.bat.table.size() == 0);
+        ASSERT_THAT(ds.bat.numEntries == 0 && ds.bat.table.size() == 0);
 
-        std::cerr << "Test: " << __FUNCTION__ << " - " << "SUCCESS" << std::endl;
+        teardown();
+    }
 
+    void testCanBuildUpFreeSpaceMapFromExistingFile()
+    {
+        setup();
+
+        uint32_t blockSize = 20;
+        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 10);
+
+        // write some blocks
+        std::string key = "archive.zip";
+        uint32_t N = 2;
+        uint32_t numBytes = N * blockSize;
+        std::vector<std::vector<unsigned char>> writeDataBuffers;
+
+        std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, blockSize, numBytes, writeDataBuffers);
+        ds.writeBlocks(key, writeBlocks);
+
+        // write some more blocks, for another key
+        std::string newKey = "video.mp4";
+        uint32_t newN = 3;
+        uint32_t newNumBytes = newN * blockSize;
+        writeDataBuffers.clear();
+        writeBlocks = BlockUtils::generateNRandom(newKey, newN, blockSize, newNumBytes, writeDataBuffers);
+        ds.writeBlocks(newKey, writeBlocks);
+
+        std::cout << ds.freeSpaceMap.toString() << std::endl;
+
+        // create a new DiskStorage object - to force an initialisation from file
+        DiskStorage newDs = DiskStorage("rackkey", "store", 0xABABABAB, blockSize, 1u << 10);
+
+        std::cout << newDs.freeSpaceMap.toString() << std::endl;
+
+        ASSERT_THAT(newDs.freeSpaceMap.blockCapacity == newDs.getNumDiskBlocks(newDs.maxDataSize));
+        for (int i = 0; i < N + newN; i++)
+            ASSERT_THAT(newDs.freeSpaceMap.isMapped(i));
+        for (int i = N + newN; i < newDs.freeSpaceMap.blockCapacity; i++)
+            ASSERT_THAT(!newDs.freeSpaceMap.isMapped(i));
+        
         teardown();
     }
 
@@ -944,9 +1001,9 @@ namespace DiskStorageTests
         auto entry = ds.bat.findBATEntry(Crypto::sha256_32(key));
 
         // ensure blocks were correctly written
-        assert((*entry)->numBytes == numBytes);
+        ASSERT_THAT((*entry)->numBytes == numBytes);
         for (int i = 0; i < N; i++)
-            assert(ds.freeSpaceMap.isMapped(i));
+            ASSERT_THAT(ds.freeSpaceMap.isMapped(i));
         
         // overwrite with M < N blocks
         uint32_t M = N - 2;
@@ -958,19 +1015,17 @@ namespace DiskStorageTests
         entry = ds.bat.findBATEntry(Crypto::sha256_32(key));
 
         // ensure didn't write a new entry (i.e. ensure we overwrote the old entry)
-        assert(ds.bat.numEntries == 1);
-        assert((*entry)->keyHash == Crypto::sha256_32(key));
+        ASSERT_THAT(ds.bat.numEntries == 1);
+        ASSERT_THAT((*entry)->keyHash == Crypto::sha256_32(key));
 
         // ensure new blocks were correctly written
-        assert((*entry)->numBytes == numBytes);
+        ASSERT_THAT((*entry)->numBytes == numBytes);
         for (int i = 0; i < M; i++)
-            assert(ds.freeSpaceMap.isMapped(i));
+            ASSERT_THAT(ds.freeSpaceMap.isMapped(i));
         
         // ensure old blocks were de-allocated
         for (int i = M; i < N; i++)
-            assert(!ds.freeSpaceMap.isMapped(i));
-        
-        std::cerr << "Test: " << __FUNCTION__ << " - " << "SUCCESS" << std::endl;
+            ASSERT_THAT(!ds.freeSpaceMap.isMapped(i));
         
         teardown();
     }
@@ -1012,17 +1067,15 @@ namespace DiskStorageTests
 
         // ensure `key1`s blocks are unmapped
         for (int i = 0; i < N; i++)
-            assert(!ds.freeSpaceMap.isMapped(i));
+            ASSERT_THAT(!ds.freeSpaceMap.isMapped(i));
 
         // ensure `key2`s and `key3`s blocks are mapped
         for (int i = N; i < N + M + (N + 1); i++)
-            assert(ds.freeSpaceMap.isMapped(i));
+            ASSERT_THAT(ds.freeSpaceMap.isMapped(i));
 
         // ensure `key3`s blocks start at block N + M
         auto entry = ds.bat.findBATEntry(Crypto::sha256_32(key3));
-        assert((*entry)->startingDiskBlockNum == N + M);
-
-        std::cerr << "Test: " << __FUNCTION__ << " - " << "SUCCESS" << std::endl;
+        ASSERT_THAT((*entry)->startingDiskBlockNum == N + M);
 
         teardown();
     }
@@ -1036,8 +1089,8 @@ namespace DiskStorageTests
         /**
          * 1MB max data size (2^20), 4KB block size (2^12) -> 256 (2^8) blocks
          */
-        uint32_t maxNumBlocks = ds.getNumBlocks(ds.maxDataSize);
-        assert(maxNumBlocks == 256);
+        uint32_t maxNumBlocks = ds.getNumDiskBlocks(ds.maxDataSize);
+        ASSERT_THAT(maxNumBlocks == 256);
 
         // should successfully write N blocks
         std::string key = "archive.zip";
@@ -1052,10 +1105,10 @@ namespace DiskStorageTests
         auto batEntry = *entry;
 
         // ensure first write was valid
-        assert(batEntry->startingDiskBlockNum == 0);
-        assert(batEntry->numBytes == numBytes);
+        ASSERT_THAT(batEntry->startingDiskBlockNum == 0);
+        ASSERT_THAT(batEntry->numBytes == numBytes);
         for (int i = 0; i < N; i++)
-            assert(ds.freeSpaceMap.isMapped(i));
+            ASSERT_THAT(ds.freeSpaceMap.isMapped(i));
 
         // should fail to write 1 more block than is available
         std::string newKey = "video.mp4";
@@ -1071,8 +1124,6 @@ namespace DiskStorageTests
             // shouldn't reach this point - investigate
             std::cout << ds.bat.toString() << std::endl;
             std::cout << ds.freeSpaceMap.toString() << std::endl;
-
-            std::cerr << "Test: " << __FUNCTION__ << " - " << "FAILED" << std::endl;
             return;
         }
         catch (std::runtime_error& e)
@@ -1081,21 +1132,81 @@ namespace DiskStorageTests
         }
 
         // ensure disk state has been maintained
-        assert(batEntry->startingDiskBlockNum == 0);
-        assert(batEntry->numBytes == numBytes);
+        ASSERT_THAT(batEntry->startingDiskBlockNum == 0);
+        ASSERT_THAT(batEntry->numBytes == numBytes);
         for (int i = 0; i < N; i++)
-            assert(ds.freeSpaceMap.isMapped(i));
+            ASSERT_THAT(ds.freeSpaceMap.isMapped(i));
 
-        std::cerr << "Test: " << __FUNCTION__ << " - " << "SUCCESS" << std::endl;
+        teardown();
     }
 
     /**
      * Testing that, on a failed write, we restore the
      * old, valid disk state.
+     * 
+     * NOTE: 
+     * 
+     * Advantage of our approach is that the block data 
+     * write occurs in one operation, so the only thing we 
+     * have to restore are the previously allocated blocks
+     * we greedily free'd.
      */
     void testRestoreDiskStateOnFailedWrite()
     {
+        setup();
 
+        DiskStorage ds = DiskStorage("rackkey", "store", 0xABABABAB, 4096, 1u << 20);
+
+        // should successfully write N blocks
+        std::string key = "archive.zip";
+        uint32_t N = 10;
+        uint32_t numBytes = N * ds.diskBlockSize;
+        std::vector<std::vector<unsigned char>> writeDataBuffers;
+
+        std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, ds.diskBlockSize, numBytes, writeDataBuffers);
+        ds.writeBlocks(key, writeBlocks);
+
+        // ensure first write was valid
+        auto entry = ds.bat.findBATEntry(Crypto::sha256_32(key));
+        auto batEntry = *entry;
+        ASSERT_THAT(batEntry->startingDiskBlockNum == 0);
+        ASSERT_THAT(batEntry->numBytes == numBytes);
+        for (int i = 0; i < N; i++)
+            ASSERT_THAT(ds.freeSpaceMap.isMapped(i));
+
+        // construct an intentionally broken Block object
+        uint32_t newN = 1;
+        uint32_t newNumBytes = N * ds.diskBlockSize;
+        writeDataBuffers.clear();
+        writeBlocks = BlockUtils::generateNRandom(key, newN, ds.diskBlockSize, newNumBytes, writeDataBuffers);
+
+        /**
+         * Setting dataSize to 0 when underlying data is non-zero size
+         * will cause writeBlocks() to cancel the write.
+         */
+        writeBlocks[0].dataSize = 0;
+
+        try
+        {
+            ds.writeBlocks(key, writeBlocks);
+
+            // shouldn't reach this point
+            return;
+        }
+        catch (std::runtime_error e)
+        {
+            std::cout << e.what() << std::endl;
+        }
+
+        // ensure first write is intact
+        entry = ds.bat.findBATEntry(Crypto::sha256_32(key));
+        batEntry = *entry;
+        ASSERT_THAT(batEntry->startingDiskBlockNum == 0);
+        ASSERT_THAT(batEntry->numBytes == numBytes);
+        for (int i = 0; i < N; i++)
+            ASSERT_THAT(ds.freeSpaceMap.isMapped(i));
+
+        teardown();
     }
 
     void runAll()
@@ -1104,33 +1215,45 @@ namespace DiskStorageTests
         std::cerr << "DiskStorageTests" << std::endl;
         std::cerr << "###################################" << std::endl;
 
-        testCanWriteAndReadNewHeaderAndBat();
-        testCanWriteAndReadOneKeysBlocks();
-        testCanWriteAndReadMultipleKeysBlocks();
-        testCanOverwriteExistingKey();
-        testFragmentedWrite();
-        testMaxBlocksReached();
-        testRestoreDiskStateOnFailedWrite();
+        std::vector<std::pair<std::string, std::function<void()>>> tests = {
+            TEST(testCanWriteAndReadNewHeaderAndBat),
+            TEST(testCanWriteAndReadOneKeysBlocks),
+            TEST(testCanWriteAndReadMultipleKeysBlocks),
+            TEST(testCanDeleteOneKeysBlocks),
+            TEST(testCanBuildUpFreeSpaceMapFromExistingFile),
+            TEST(testCanOverwriteExistingKey),
+            TEST(testFragmentedWrite),
+            TEST(testMaxBlocksReached),
+            TEST(testRestoreDiskStateOnFailedWrite),
+        };
+
+        for (auto &[name, func] : tests)
+        {
+            TestUtils::runTest(name, func);
+        }
+
+        std::cerr << std::endl;
     }
 }
 
 int main()
 {
     DiskStorageTests::runAll();
-
-    // FreeSpaceMapTests::testFreeNBlocks();
-    // FreeSpaceMapTests::testAllocateNBlocks();
-    // FreeSpaceMapTests::testAllocateThenFree();
-
+    FreeSpaceMapTests::runAll();
 }
 
 /*
 Immediate todo:
+    - turn FreeSpaceMap tests into real tests with ASSERT_THAT calls
+    - header needs to be properly initialised from a file
+        - i.e. magicNumber, blockSize and maxData size shouldn't
+          even have class members  -> should just call from the header
+    - have a go at using it to save blocks and retreive them
+        - do we need to save blockNums in the data section as well?
     - helper function for opening and closing the file 
     - checks in server.cpp that:
         - blocks are in correct order (disk_storage presumes they are)
         - first (blockNum - 1) blocks are full
-    - have a go at using it to save blocks and retreive them
     - handle hash collisions:
         - heh?
     - handle concurrent r/w of storeFile (below)

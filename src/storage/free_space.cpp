@@ -5,6 +5,8 @@
 #include "block.hpp"
 #include "crypto.hpp"
 
+#include "test_utils.hpp"
+
 ////////////////////////////////////////////
 // FreeSpaceMap: public methods
 ////////////////////////////////////////////
@@ -277,12 +279,33 @@ namespace FreeSpaceMapTests
         uint32_t N = 10;
         auto alloc = fsm.findNFreeBlocks(N);
         uint32_t startBlockNum = *alloc;
-        assert(startBlockNum == 7);
+        ASSERT_THAT(startBlockNum == 7);
         fsm.allocateNBlocks(startBlockNum, N);
         std::cout << fsm.toString(true);
 
         // free those N blocks
         fsm.freeNBlocks(startBlockNum, N);
         std::cout << fsm.toString(true);
+    }
+
+    void runAll()
+    {
+        std::cerr << "###################################" << std::endl;
+        std::cerr << "FreeSpaceMapTests" << std::endl;
+        std::cerr << "###################################" << std::endl;
+
+        std::vector<std::pair<std::string, std::function<void()>>> tests = {
+            TEST(testFreeNBlocks),
+            TEST(testAllocateNBlocks),
+            TEST(testAllocateThenFree)
+        };
+
+        for (auto &[name, func] : tests)
+        {
+            TestUtils::runTest(name, func);
+        }
+
+        std::cerr << std::endl;
+
     }
 };

@@ -83,4 +83,5 @@ namespace FreeSpaceMapTests
     void testFreeNBlocks();
     void testAllocateNBlocks();
     void testAllocateThenFree();
+    void runAll();
 };
