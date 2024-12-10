@@ -10,6 +10,12 @@
 /**
  * For the given `condition`, throw a runtime error
  * if it doesn't evaluate to true.
+ * 
+ * NOTE:
+ *
+ * Throwing a runtime error exits from the testing function immediately.
+ * In future, might want to continue executing and report all errors.
+ * For now, this is fine.
  */
 #define ASSERT_THAT(condition) \
     if (!(condition)) throw std::runtime_error(std::string(#condition) + " failed at line: " + std::to_string(__LINE__))

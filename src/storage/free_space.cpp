@@ -228,28 +228,36 @@ namespace FreeSpaceMapTests
 {
     void testFreeNBlocks()
     {
-        int blockCapacity = 32;
+        uint32_t blockCapacity = 32;
         FreeSpaceMap fsm(blockCapacity);
 
-        // allocate some blocks
+        // allocate N blocks, starting at block 0
+        uint32_t N = 26;
         fsm.bitMap[0] = 0xFF; // 8 blocks
         fsm.bitMap[1] = 0xFF; // 8 blocks
         fsm.bitMap[2] = 0xFF; // 8 blocks
         fsm.bitMap[3] = 0x03; // 2 blocks
 
-        std::cout << fsm.toString(true);
+        for (int i = 0; i < N; i++)
+            ASSERT_THAT(fsm.isMapped(i));
+        for (int i = N; i < blockCapacity; i++)
+            ASSERT_THAT(!fsm.isMapped(i));
 
         // free `N` blocks starting at `startingBlockNum`
         uint32_t startingBlockNum = 14;
-        uint32_t N = 12;
+        N = 12;
         fsm.freeNBlocks(startingBlockNum, N);
 
-        std::cout << fsm.toString(true);
+        for (int i = 0; i < startingBlockNum; i++)
+            ASSERT_THAT(fsm.isMapped(i));
+        
+        for (int i = startingBlockNum; i < startingBlockNum + N; i++)
+            ASSERT_THAT(!fsm.isMapped(i));
     }
 
     void testAllocateNBlocks()
     {
-        int blockCapacity = 32;
+        uint32_t blockCapacity = 32;
         FreeSpaceMap fsm(blockCapacity);
         uint32_t N = 10;
 
@@ -259,11 +267,20 @@ namespace FreeSpaceMapTests
         fsm.bitMap[2] = 0x01; // 0000 0001
         fsm.bitMap[3] = 0x00; // 0000 0000
 
-        // should allocate 10 blocks starting at block 17
+        // should allocate N blocks starting at block 17
         auto alloc = fsm.findNFreeBlocks(N);
         uint32_t startBlockNum = *alloc;
         fsm.allocateNBlocks(startBlockNum, N);
-        std::cout << fsm.toString(true);
+
+        ASSERT_THAT(startBlockNum == 17);
+        ASSERT_THAT(fsm.bitMap[0] == 0x7F);
+        ASSERT_THAT(fsm.bitMap[1] == 0x00);
+        ASSERT_THAT(fsm.isMapped(16));
+
+        for (int i = 17; i < 17 + N; i++)
+            ASSERT_THAT(fsm.isMapped(i));
+        for (int i = 17 + N; i < blockCapacity; i++)
+            ASSERT_THAT(!fsm.isMapped(i));
     }
 
     void testAllocateThenFree()
@@ -273,19 +290,27 @@ namespace FreeSpaceMapTests
 
         // pre-allocate some blocks
         fsm.bitMap[0] = 0x7F; // 0111 1111
-        std::cout << fsm.toString(true);
 
         // allocate N blocks - should start at block 7
         uint32_t N = 10;
         auto alloc = fsm.findNFreeBlocks(N);
         uint32_t startBlockNum = *alloc;
-        ASSERT_THAT(startBlockNum == 7);
         fsm.allocateNBlocks(startBlockNum, N);
-        std::cout << fsm.toString(true);
+
+        ASSERT_THAT(startBlockNum == 7);
+        for (int i = 0; i < 7 + N; i++)
+            ASSERT_THAT(fsm.isMapped(i));
+        for (int i = 7 + N; i < blockCapacity; i++)
+            ASSERT_THAT(!fsm.isMapped(i));
 
         // free those N blocks
         fsm.freeNBlocks(startBlockNum, N);
-        std::cout << fsm.toString(true);
+
+        // ensure the previous state is restored
+        for (int i = 0; i < 7; i++)
+            ASSERT_THAT(fsm.isMapped(i));
+        for (int i = 7; i < blockCapacity; i++)
+            ASSERT_THAT(!fsm.isMapped(i));
     }
 
     void runAll()
