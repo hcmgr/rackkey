@@ -8,6 +8,7 @@
 
 #include "block.hpp"
 #include "utils.hpp"
+#include "disk_storage.hpp"
 
 using namespace web;
 using namespace web::http;
@@ -18,9 +19,9 @@ class StorageServer
 {
 private:
     /**
-     * Placeholder for the actual on-disk storage.
+     * On-disk storage
      */
-    std::map<std::string, std::vector<Block>> blockStore;
+    DiskStorage diskStorage;
 
 public:
 
@@ -28,7 +29,7 @@ public:
      * Default constructor
      */
     StorageServer()
-        : blockStore()
+        : diskStorage("rackkey", "store", 4096, 1u << 30)
     {
     }
 
@@ -39,9 +40,20 @@ public:
     {
         std::cout << "GET req received: " << key << std::endl;
 
-        // TODO: retreive from actual store
-        std::vector<Block> blocks = this->blockStore[key];
+        std::cout << diskStorage.bat.toString() << std::endl;
 
+        std::vector<unsigned char> readBuffer;
+        std::vector<Block> blocks;
+
+        try 
+        {
+            blocks = diskStorage.readBlocks(key, readBuffer);
+        }
+        catch (std::runtime_error &e)
+        {
+            std::cout << e.what() << std::endl;
+        }
+        
         // serialize
         std::vector<unsigned char> payloadBuffer;
         for (auto block : blocks)
@@ -61,7 +73,8 @@ public:
     void putHandler(http_request request, std::string key)
     {
         std::cout << "PUT req received: " << key << std::endl;
-        std::shared_ptr<std::vector<unsigned char>> payloadPtr = std::make_shared<std::vector<unsigned char>>();
+
+        auto payloadPtr = std::make_shared<std::vector<unsigned char>>();
 
         pplx::task<void> task = request.extract_vector()
 
@@ -71,26 +84,34 @@ public:
             *payloadPtr = std::move(payload);
 
             std::vector<Block> blocks = Block::deserialize(*payloadPtr);
-
-            for (auto block : blocks)
+            
+            try
             {
-                // TODO: write to actual storage
-                this->blockStore[key].push_back(block);
+                diskStorage.writeBlocks(key, blocks);
             }
+            catch (std::runtime_error &e)
+            {
+                std::cout << e.what() << std::endl;
+            }
+
         });
 
         task.wait();
+
+        std::cout << diskStorage.bat.toString() << std::endl;
 
         request.reply(status_codes::OK);
         return;
     }
     
     /**
+     * Deletes `key`s data from storage.
      * 
+     * TODO:
      */
     void deleteHandler(http_request request, std::string key)
     {
-
+        std::cout << "PUT req received: " << key << std::endl;
     }
 
     void startServer() 
@@ -140,9 +161,58 @@ void run()
 {
     StorageServer storageServer = StorageServer();
     storageServer.startServer();
+
+    // DiskStorageTests::runAll();
 }
 
 int main()
 {
     run();
 }
+
+/*
+Immediate todo:
+    - find work around for block num problem OR include in the data section
+    - test all three ops (read, write, delete) using the endpoint
+        - after that, we literally have it working!
+    - helper function for opening and closing the file 
+    - checks in server.cpp that:
+        - blocks are in correct order (disk_storage presumes they are)
+        - first (blockNum - 1) blocks are full
+    - handle hash collisions:
+        - heh?
+    - handle concurrent r/w of storeFile (below)
+
+Maybe:
+    - handle concurrent r/w
+        - i.e. use locks to prevent multiple threads
+          r/w store file at same time
+        - master may have multiple threads call same node
+          concurrently, in which case multiple storage server
+          threads will access same DiskStorage simultaneously
+        - can probably just lock the entire DiskStorage for now
+        - better approach:
+            - when read, obtain a shared lock 
+                - wait for any exclusive lock
+            - when write, obtain an exclusive lock
+                - wait for any exclusive AND shared lock
+    
+General cleanup:
+    - make helper method for opening and closing store file
+        - looks the same each time we do it
+    - nice explanation at top of disk_storage.cpp/.hpp
+    - emphasise difference between diskBlocks and dataBlocks
+        - ehhh...we are now only storing the data in our 
+          on-disk blocks, so there really is no distinction
+        - only potential complexity is that:
+            - for us, data block size == disk block size (always)
+            - think through consequences of allowing data vs disk block
+              size to be difference
+    - storage vs store naming? (DiskStorage -> StoreFile)?
+
+Long term:
+    - put servers on docker (once know stable)
+    - master periodically 'health checks' servers
+    - replication
+    - CAP stuff
+*/

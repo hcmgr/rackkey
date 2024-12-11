@@ -102,7 +102,8 @@ public:
         std::string storeDirPath = "rackkey",
         std::string storeFileName = "store",
         uint32_t diskBlockSize = 4096,
-        uint32_t maxDataSize = 1u << 30
+        uint32_t maxDataSize = 1u << 30,
+        bool removeExistingStore = true
     );
 
     ~DiskStorage();
@@ -110,9 +111,14 @@ public:
     /**
      * Retreive and return all blocks of the given key.
      * 
+     * Throws: 
+     *      runtime_error() - on any error during the reading process
+     * 
      * NOTE:
      *
-     * `readBuffer` is the buffer we read the raw block data into.
+     * `readBuffer` is the buffer we read the raw block data into 
+     * and it may be emptied, as it is resized as needed.
+     * 
      * 
      * We pass this in so that the data the block pointers reference
      * does not get de-allocated.
@@ -121,6 +127,9 @@ public:
 
     /**
      * Write the given blocks for the given key.
+     * 
+     * Throws:
+     *      runtime_error() - on any error during the writing process
      * 
      * NOTE: 
      * 
@@ -131,6 +140,9 @@ public:
 
     /**
      * Deletes the BAT entry and frees the blocks of the given `key`.
+     * 
+     * Throws:
+     *      runtime_error - on any error during the deleting process
      */
     void deleteBlocks(std::string key);
 
@@ -158,6 +170,8 @@ private:
 
     fs::path storeFilePath;
     std::fstream storeFile;
+
+    bool removeExistingStore;
 
     /**
      * Creates a new store file in a new store directory.

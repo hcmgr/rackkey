@@ -169,15 +169,20 @@ DiskStorage::DiskStorage(
     std::string storeDirPath,
     std::string storeFileName,
     uint32_t diskBlockSize,
-    uint32_t maxDataSize
+    uint32_t maxDataSize,
+    bool removeExistingStore
 )
     : storeDirPath(fs::path(storeDirPath)),
-      storeFileName(storeFileName)
+      storeFileName(storeFileName),
+      removeExistingStore(removeExistingStore)
 {
     this->storeFilePath = this->storeDirPath / this->storeFileName;
 
+    if (removeExistingStore)
+        FileSystemUtils::removeDirectory(this->storeDirPath);
+
     // initialise from existing store file
-    if (fs::exists(this->storeFilePath))
+    if (!removeExistingStore && fs::exists(this->storeFilePath))
     {
         std::cout << "Reading from existing store file: " << this->storeFilePath << std::endl;
 
@@ -204,9 +209,14 @@ DiskStorage::~DiskStorage()
 /**
  * Retreive and return all blocks of the given key.
  * 
+ * Throws: 
+ *      runtime_error() - on any error during the reading process
+ * 
  * NOTE:
  *
- * `readBuffer` is the buffer we read the raw block data into.
+ * `readBuffer` is the buffer we read the raw block data into 
+ * and it may be emptied, as it is resized as needed.
+ * 
  * 
  * We pass this in so that the data the block pointers reference
  * does not get de-allocated.
@@ -278,6 +288,9 @@ std::vector<Block> DiskStorage::readBlocks(std::string key, std::vector<unsigned
 
 /**
  * Write the given blocks for the given key.
+ * 
+ * Throws:
+ *      runtime_error() - on any error during the writing process
  * 
  * NOTE: 
  * 
@@ -405,6 +418,9 @@ void DiskStorage::writeBlocks(std::string key, std::vector<Block> dataBlocks)
 
 /**
  * Deletes the BAT entry and frees the blocks of the given `key`.
+ * 
+ * Throws:
+ *      runtime_error - on any error during the deleting process
  */
 void DiskStorage::deleteBlocks(std::string key)
 {
@@ -1154,52 +1170,3 @@ namespace DiskStorageTests
     }
 }
 
-int main()
-{
-    DiskStorageTests::runAll();
-    FreeSpaceMapTests::runAll();
-}
-
-/*
-Immediate todo:
-    - have a go at using it to save blocks and retreive them
-        - do we need to save blockNums in the data section as well?
-    - helper function for opening and closing the file 
-    - checks in server.cpp that:
-        - blocks are in correct order (disk_storage presumes they are)
-        - first (blockNum - 1) blocks are full
-    - handle hash collisions:
-        - heh?
-    - handle concurrent r/w of storeFile (below)
-
-Maybe:
-    - handle concurrent r/w
-        - i.e. use locks to prevent multiple threads
-          r/w store file at same time
-        - master may have multiple threads call same node
-          concurrently, in which case multiple storage server
-          threads will access same DiskStorage simultaneously
-        - can probably just lock the entire DiskStorage for now
-        - better approach:
-            - when read, obtain a shared lock 
-                - wait for any exclusive lock
-            - when write, obtain an exclusive lock
-                - wait for any exclusive AND shared lock
-    
-General cleanup:
-    - make helper method for opening and closing store file
-        - looks the same each time we do it
-    - clean up DiskStorage
-        - seems too large
-        - file path stuff and private methods are ugly
-        - perhaps can abstract the file path stuff to another class
-    - nice explanation at top of disk_storage.cpp/.hpp
-    - emphasise difference between diskBlocks and dataBlocks
-        - ehhh...we are now only storing the data in our 
-          on-disk blocks, so there really is no distinction
-        - only potential complexity is that:
-            - for us, data block size == disk block size (always)
-            - think through consequences of allowing data vs disk block
-              size to be difference
-    - storage vs store naming? (DiskStorage -> StoreFile)?
-*/

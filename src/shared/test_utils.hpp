@@ -18,7 +18,8 @@
  * For now, this is fine.
  */
 #define ASSERT_THAT(condition) \
-    if (!(condition)) throw std::runtime_error(std::string(#condition) + " failed at line: " + std::to_string(__LINE__))
+    if (!(condition)) \
+        throw std::runtime_error(std::string(#condition) + " failed at line: " + std::to_string(__LINE__))
 
 /**
  * Testing library
