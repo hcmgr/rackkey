@@ -346,9 +346,16 @@ void DiskStorage::writeBlocks(std::string key, std::vector<Block> dataBlocks)
      */
     std::vector<unsigned char> buffer;
     uint32_t numBytes = 0;
+    unsigned char blockNum[sizeof(uint32_t)];
 
     for (auto &dataBlock : dataBlocks)
     {
+        // // write block number
+        // std::memcpy(blockNum, &dataBlock.blockNum, sizeof(dataBlock.blockNum));
+        // buffer.insert(buffer.end(), blockNum, blockNum + sizeof(dataBlock.blockNum));
+        // numBytes += sizeof(dataBlock.blockNum);
+
+        // write data
         buffer.insert(buffer.end(), dataBlock.dataStart, dataBlock.dataEnd);
         numBytes += dataBlock.dataSize;
     }

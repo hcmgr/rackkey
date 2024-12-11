@@ -173,9 +173,6 @@ int main()
 /*
 Immediate todo:
     - find work around for block num problem OR include in the data section
-    - test all three ops (read, write, delete) using the endpoint
-        - after that, we literally have it working!
-    - helper function for opening and closing the file 
     - checks in server.cpp that:
         - blocks are in correct order (disk_storage presumes they are)
         - first (blockNum - 1) blocks are full
