@@ -22,6 +22,12 @@
         throw std::runtime_error(std::string(#condition) + " failed at line: " + std::to_string(__LINE__))
 
 /**
+ * Foribly fail the test by throwing a runtime error with the given `msg`.
+ */
+#define FORCE_FAIL(msg) \
+    throw std::runtime_error(std::string(msg) + ", line: " + std::to_string(__LINE__))
+
+/**
  * Testing library
  */
 namespace TestUtils

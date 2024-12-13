@@ -176,14 +176,13 @@ std::string Block::toString(bool showData)
 namespace BlockUtils
 {
     /**
-     * Generate `N` blocks with total data size `totalDataSize`, each with
+     * Generate `N` blocks with total data size `numBytes`, each with
      * key `key`.
      * 
      * NOTE: used to write tests for Block and other modules.
      */
-    std::vector<Block> generateNRandom(
+    std::vector<Block> generateRandom(
         std::string key, 
-        uint32_t N, 
         uint32_t blockSize,
         uint32_t numBytes,
         std::vector<std::vector<unsigned char>> &dataBuffers
@@ -234,7 +233,7 @@ namespace BlockTests
         uint32_t numBytes = N * blockSize + 40;
         std::vector<std::vector<unsigned char>> dataBuffers;
 
-        std::vector<Block> blocks = BlockUtils::generateNRandom("archive.zip", 10, blockSize, numBytes, dataBuffers);
+        std::vector<Block> blocks = BlockUtils::generateRandom("archive.zip", blockSize, numBytes, dataBuffers);
 
         // Pretty print the blocks before serialization
         std::cout << "Before Serialization:" << std::endl << std::endl;

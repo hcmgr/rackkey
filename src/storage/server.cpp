@@ -29,7 +29,7 @@ public:
      * Default constructor
      */
     StorageServer()
-        : diskStorage("rackkey", "store", 4096, 1u << 30)
+        : diskStorage("rackkey", "store", 4096, 1u << 30, true)
     {
     }
 
@@ -40,14 +40,13 @@ public:
     {
         std::cout << "GET req received: " << key << std::endl;
 
-        std::cout << diskStorage.bat.toString() << std::endl;
-
         std::vector<unsigned char> readBuffer;
         std::vector<Block> blocks;
+        uint32_t dataBlockSize = 4096;
 
         try 
         {
-            blocks = diskStorage.readBlocks(key, readBuffer);
+            blocks = diskStorage.readBlocks(key, dataBlockSize, readBuffer);
         }
         catch (std::runtime_error &e)
         {
@@ -98,7 +97,7 @@ public:
 
         task.wait();
 
-        std::cout << diskStorage.bat.toString() << std::endl;
+        // std::cout << diskStorage.bat.toString() << std::endl;
 
         request.reply(status_codes::OK);
         return;
@@ -172,7 +171,6 @@ int main()
 
 /*
 Immediate todo:
-    - find work around for block num problem OR include in the data section
     - checks in server.cpp that:
         - blocks are in correct order (disk_storage presumes they are)
         - first (blockNum - 1) blocks are full
@@ -211,5 +209,4 @@ Long term:
     - put servers on docker (once know stable)
     - master periodically 'health checks' servers
     - replication
-    - CAP stuff
 */

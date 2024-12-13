@@ -184,12 +184,13 @@ DiskStorage::DiskStorage(
     // initialise from existing store file
     if (!removeExistingStore && fs::exists(this->storeFilePath))
     {
-        std::cout << "Reading from existing store file: " << this->storeFilePath << std::endl;
-
         readHeader();
         readBAT();
         freeSpaceMap.initialise(getNumDiskBlocks(maxDataSize));
         populateFreeSpaceMapFromFile();
+
+        std::cout << "Reading from existing store file: " << this->storeFilePath << std::endl;
+        std::cout << this->bat.toString() << std::endl;
     }
 
     // create new store file
@@ -199,6 +200,8 @@ DiskStorage::DiskStorage(
         initialiseHeader(diskBlockSize, maxDataSize);
         writeHeader();
         freeSpaceMap.initialise(getNumDiskBlocks(maxDataSize));
+
+        std::cout << "Created new store file: " << this->storeFilePath << std::endl;
     }
 }
 
@@ -221,7 +224,7 @@ DiskStorage::~DiskStorage()
  * We pass this in so that the data the block pointers reference
  * does not get de-allocated.
  */
-std::vector<Block> DiskStorage::readBlocks(std::string key, std::vector<unsigned char> &readBuffer)
+std::vector<Block> DiskStorage::readBlocks(std::string key, uint32_t dataBlockSize, std::vector<unsigned char> &readBuffer)
 {
     // find BAT entry of `key`
     auto entry = this->bat.findBATEntry(Crypto::sha256_32(key));
@@ -234,15 +237,15 @@ std::vector<Block> DiskStorage::readBlocks(std::string key, std::vector<unsigned
      * Read all block data into a single buffer.
      */
     uint32_t offset = getDiskBlockOffset(batEntry->startingDiskBlockNum);
-    uint32_t numBytes = batEntry->numBytes;
+    uint32_t totalNumBytes = batEntry->numBytes;
 
-    readBuffer.resize(numBytes);
+    readBuffer.resize(totalNumBytes);
 
     this->storeFile.open(storeFilePath, std::fstream::in | std::fstream::out);
     if (this->storeFile.is_open())
     {
         this->storeFile.seekg(offset);
-        this->storeFile.read(reinterpret_cast<char*>(readBuffer.data()), numBytes);
+        this->storeFile.read(reinterpret_cast<char*>(readBuffer.data()), totalNumBytes);
 
         if (this->storeFile.fail() || this->storeFile.bad())
             throw std::runtime_error("readBlocks() - bad read of cumulative block data from disk");
@@ -252,7 +255,7 @@ std::vector<Block> DiskStorage::readBlocks(std::string key, std::vector<unsigned
     else
         throw std::runtime_error("failed to open file for reading!");
     
-    if (readBuffer.size() != numBytes)
+    if (readBuffer.size() != totalNumBytes)
         throw std::runtime_error("readBlocks() - read buffer size != on-disk size");
     
     /**
@@ -260,27 +263,31 @@ std::vector<Block> DiskStorage::readBlocks(std::string key, std::vector<unsigned
      */
     std::vector<Block> blocks;
 
-    uint32_t numBlocks = getNumDiskBlocks(numBytes);
-    auto bufferIterator = readBuffer.begin();
-
-    for (uint32_t i = 0; i < numBlocks; i++) 
+    auto iter = readBuffer.begin();
+    while (iter < readBuffer.end())
     {
+        // read block num
+        uint32_t blockNum;
+        std::memcpy(&blockNum, &(*iter), sizeof(uint32_t));
+        iter += sizeof(uint32_t);
+
+        // read data
         uint32_t dataSize = std::min(
-            this->header.diskBlockSize,
-            static_cast<uint32_t>(std::distance(bufferIterator, readBuffer.end()))
+            dataBlockSize,
+            static_cast<uint32_t>(std::distance(iter, readBuffer.end()))
         );
 
         Block block;
 
         block.key = key;
-        block.blockNum = i;
+        block.blockNum = blockNum;
         block.dataSize = dataSize;
-        block.dataStart = bufferIterator;
-        block.dataEnd = bufferIterator + dataSize;
+        block.dataStart = iter;
+        block.dataEnd = iter + dataSize;
 
         blocks.push_back(std::move(block));
 
-        bufferIterator += dataSize;
+        iter += dataSize;
     }
         
     return blocks;
@@ -305,13 +312,12 @@ void DiskStorage::writeBlocks(std::string key, std::vector<Block> dataBlocks)
     auto entry = this->bat.findBATEntry(Crypto::sha256_32(key));
 
     /**
-     * If an entry already exists for the key, free its blocks
-     * in the freeSpaceMap.
+     * If an entry already exists for that key, free its blocks.
      * 
-     * NOTE: if the new block allocation fails, we use `freedBlocks`
-     *       to restore the old block allocation
+     * NOTE: `freedBlocks` keeps track of the blocks we pre-emptively 
+     *        free, in case the new allocation fails and we must restore.
      */
-    std::pair<uint32_t, uint32_t> freedBlocks;
+    std::pair<uint32_t, uint32_t> freedBlocks; // {startingBlockNum, numberOfBlocks}
     if (entry != std::nullopt)
     {
         auto existingBatEntry = *entry;
@@ -328,39 +334,40 @@ void DiskStorage::writeBlocks(std::string key, std::vector<Block> dataBlocks)
     if (entry != std::nullopt)
         this->freeSpaceMap.allocateNBlocks(freedBlocks.first, freedBlocks.second);
     };
-
+    
+    uint32_t numTotalBytes = 0;
+    for (auto &dataBlock : dataBlocks) 
+    {
+        numTotalBytes += sizeof(uint32_t);
+        numTotalBytes += dataBlock.dataSize;
+    }
+    
     /**
      * Find a contiguous section of N free disk blocks and retreive
      * the starting block number.
      */
-    uint32_t N = dataBlocks.size();
+    uint32_t N = getNumDiskBlocks(numTotalBytes);
     auto alloc = freeSpaceMap.findNFreeBlocks(N);
     if (alloc == std::nullopt)
         throw std::runtime_error("writeBlocks() - no contiguous section of " + std::to_string(N) + " blocks found");
 
     /**
      * Copy all block data into a single buffer (which we later write out to disk).
-     * 
-     * NOTE: we do this because an in-memory copy and a single disk I/O is 
-     *       faster than N disk I/O's (espeically for large block sizes)
      */
     std::vector<unsigned char> buffer;
-    uint32_t numBytes = 0;
     unsigned char blockNum[sizeof(uint32_t)];
 
     for (auto &dataBlock : dataBlocks)
     {
-        // // write block number
-        // std::memcpy(blockNum, &dataBlock.blockNum, sizeof(dataBlock.blockNum));
-        // buffer.insert(buffer.end(), blockNum, blockNum + sizeof(dataBlock.blockNum));
-        // numBytes += sizeof(dataBlock.blockNum);
+        // write block number
+        std::memcpy(blockNum, &dataBlock.blockNum, sizeof(dataBlock.blockNum));
+        buffer.insert(buffer.end(), blockNum, blockNum + sizeof(dataBlock.blockNum));
 
         // write data
         buffer.insert(buffer.end(), dataBlock.dataStart, dataBlock.dataEnd);
-        numBytes += dataBlock.dataSize;
     }
 
-    if (buffer.size() != numBytes)
+    if (buffer.size() != numTotalBytes)
     {
         restoreFreedBlocks();
         throw std::runtime_error("writeBlocks() - bad copy of data blocks to output buffer");
@@ -400,7 +407,7 @@ void DiskStorage::writeBlocks(std::string key, std::vector<Block> dataBlocks)
 
         // update entry fields
         existingBatEntry->startingDiskBlockNum = startingDiskBlockNum;
-        existingBatEntry->numBytes = numBytes;
+        existingBatEntry->numBytes = numTotalBytes;
 
         /**
          * NOTE: at this point, the existing blocks have already been freed
@@ -414,7 +421,7 @@ void DiskStorage::writeBlocks(std::string key, std::vector<Block> dataBlocks)
         freeSpaceMap.allocateNBlocks(startingDiskBlockNum, N);
 
         // insert new entry
-        BATEntry batEntry(Crypto::sha256_32(key), startingDiskBlockNum, numBytes);
+        BATEntry batEntry(Crypto::sha256_32(key), startingDiskBlockNum, numTotalBytes);
         bat.table.push_back(std::move(batEntry));
         bat.numEntries++;
     }
@@ -475,9 +482,9 @@ uint32_t DiskStorage::getDiskBlockOffset(uint32_t diskBlockNum)
 /**
  * Returns number of disk blocks `numBytes` bytes takes up.
  */
-uint32_t DiskStorage::getNumDiskBlocks(uint32_t numBytes)
+uint32_t DiskStorage::getNumDiskBlocks(uint32_t numDataBytes)
 {
-    return MathUtils::ceilDiv(numBytes, this->header.diskBlockSize);
+    return MathUtils::ceilDiv(numDataBytes, this->header.diskBlockSize);
 }
 
 ////////////////////////////////////////////
@@ -498,7 +505,6 @@ void DiskStorage::createStoreFile()
 
     // create directory
     fs::create_directory(this->storeDirPath);
-    std::cout << "Created store directory: " << this->storeDirPath << std::endl;
 
     // create file
     this->storeFile = std::fstream(this->storeFilePath, 
@@ -507,7 +513,7 @@ void DiskStorage::createStoreFile()
     if (!this->storeFile.is_open())
         throw std::runtime_error("couldn't create store file");
 
-    std::cout << "Created store file: " << this->storeFilePath << std::endl;
+    
 
     // write to max byte
     uint32_t totalFileSize = this->getTotalFileSize();
@@ -697,20 +703,22 @@ namespace DiskStorageTests
     void testCanWriteAndReadNewHeaderAndBat()
     {
         setup();
+        
+        uint32_t dataBlockSize = 20;
+        uint32_t diskBlockSize = 20;
 
         // implictly creates and writes header
-        uint32_t blockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", blockSize, 1u << 30);
-        std::cout << ds.header.toString() << std::endl;
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30);
 
-        // write some blocks
+        // write N data blocks
         std::string key = "archive.zip";
         uint32_t N = 2;
-        uint32_t numBytes = N * blockSize;
+        uint32_t numDataBytes = N * dataBlockSize;
         std::vector<std::vector<unsigned char>> writeDataBuffers;
-        std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, blockSize, numBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
         ds.writeBlocks(key, writeBlocks);
 
+        // write N more data blocks, for a different key
         key = "video.mp4";
         ds.writeBlocks(key, writeBlocks);
 
@@ -738,24 +746,26 @@ namespace DiskStorageTests
     {
         setup();
 
-        uint32_t blockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", blockSize, 1u << 30);
+        uint32_t dataBlockSize = 40;
+        uint32_t diskBlockSize = 20;
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30);
 
         std::string key = "archive.zip";
         uint32_t N = 2;
-        uint32_t numBytes = N * blockSize + 10;
+        uint32_t numDataBytes = N * dataBlockSize + 10;
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
         // write all blocks
-        std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, blockSize, numBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        std::cout << writeBlocks.size() << std::endl;
         ds.writeBlocks(key, writeBlocks);
 
         // instantiate new object so don't have header, bat or file stream cached (i.e. must read from disk)
-        DiskStorage newDs = DiskStorage("rackkey", "store", blockSize, 1u << 30);
+        DiskStorage newDs = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30);
 
         // read blocks
         std::vector<unsigned char> readBuffer;
-        std::vector<Block> readBlocks = newDs.readBlocks(key, readBuffer);
+        std::vector<Block> readBlocks = newDs.readBlocks(key, dataBlockSize, readBuffer);
 
         // ensure what we wrote is what we read
         if (writeBlocks.size() != readBlocks.size())
@@ -779,14 +789,15 @@ namespace DiskStorageTests
     {
         setup();
 
-        uint32_t blockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", blockSize, 1u << 30);
+        uint32_t dataBlockSize = 40;
+        uint32_t diskBlockSize = 20;
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30);
 
         std::vector<std::string> keys;
         std::vector<std::vector<Block>> writeBlocksList;
         std::vector<std::vector<std::vector<unsigned char>>> writeDataBuffersList;
 
-        uint32_t M = 5;
+        uint32_t M = 1; // num. different keys we write
 
         // generate data for M keys
         for (uint32_t i = 0; i < M; i++) 
@@ -795,11 +806,11 @@ namespace DiskStorageTests
             keys.push_back(key);
 
             uint32_t N = i + 1; // Vary the number of blocks per key
-            uint32_t numBytes = N * blockSize + (i % blockSize);
+            uint32_t numDataBytes = N * dataBlockSize + (i % dataBlockSize);
             std::vector<std::vector<unsigned char>> writeDataBuffers;
 
             // Generate and write blocks
-            std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, blockSize, numBytes, writeDataBuffers);
+            std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
             ds.writeBlocks(key, writeBlocks);
 
             // Store for later validation
@@ -808,7 +819,7 @@ namespace DiskStorageTests
         }
 
         // Instantiate new object to ensure no cached data (read from disk)
-        DiskStorage newDs = DiskStorage("rackkey", "store", blockSize, 1u << 30);
+        DiskStorage newDs = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30);
 
         // Read and validate data for each key
         for (uint32_t i = 0; i < M; i++) 
@@ -827,7 +838,7 @@ namespace DiskStorageTests
 
             // Read blocks
             std::vector<unsigned char> readBuffer;
-            std::vector<Block> readBlocks = newDs.readBlocks(key, readBuffer);
+            std::vector<Block> readBlocks = newDs.readBlocks(key, dataBlockSize, readBuffer);
 
             std::cout << "Read blocks: " << std::endl << std::endl;
             for (auto block : readBlocks)
@@ -839,12 +850,7 @@ namespace DiskStorageTests
             {
                 ASSERT_THAT(expectedBlocks[j].equals(readBlocks[j]));
             }
-
-            ASSERT_THAT(totalWriteBuffer == readBuffer);
         }
-
-        std::cout << newDs.header.toString() << std::endl;
-        std::cout << newDs.bat.toString() << std::endl;
 
         teardown();
     }
@@ -853,29 +859,33 @@ namespace DiskStorageTests
     {
         setup();
 
-        uint32_t blockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", blockSize, 1u << 30);
+        uint32_t dataBlockSize = 40;
+        uint32_t diskBlockSize = 20;
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30);
 
         // write some blocks
         std::string key = "archive.zip";
         uint32_t N = 2;
         uint32_t extraBytes = 10;
-        uint32_t numBytes = N * blockSize + extraBytes;
+        uint32_t numDataBytes = N * dataBlockSize + extraBytes;
+        uint32_t numTotalBytes = numDataBytes + ((N+1) * sizeof(uint32_t));
+        uint32_t numDiskBlocks = ds.getNumDiskBlocks(numTotalBytes);
+        std::cout << numDiskBlocks << std::endl;
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
-        std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, blockSize, numBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
         ds.writeBlocks(key, writeBlocks);
-        
-        // should have written (N + 1) blocks, starting at blockNum = 0
-        for (int i = 0; i < N + 1; i++)
+
+        // should have written `numDiskBlocks` blocks, starting at blockNum = 0
+        for (int i = 0; i < numDiskBlocks; i++)
             ASSERT_THAT(ds.freeSpaceMap.isMapped(i));
         ASSERT_THAT(ds.bat.numEntries == 1);
 
         // delete blocks
         ds.deleteBlocks(key);
 
-        // first (N + 1) blocks should now be free
-        for (int i = 0; i < N + 1; i++)
+        // first `numDiskBlocks` blocks should now be free
+        for (int i = 0; i < numDiskBlocks; i++)
             ASSERT_THAT(!ds.freeSpaceMap.isMapped(i));
 
         ASSERT_THAT(ds.bat.numEntries == 0 && ds.bat.table.size() == 0);
@@ -887,37 +897,40 @@ namespace DiskStorageTests
     {
         setup();
 
-        uint32_t blockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", blockSize, 1u << 10);
+        uint32_t dataBlockSize = 40;
+        uint32_t diskBlockSize = 20;
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 10);
 
         // write some blocks
         std::string key = "archive.zip";
         uint32_t N = 2;
-        uint32_t numBytes = N * blockSize;
+        uint32_t numDataBytes = N * dataBlockSize;
+        uint32_t numTotalBytes = numDataBytes + (N * sizeof(uint32_t));
+        uint32_t numDiskBlocks = ds.getNumDiskBlocks(numTotalBytes);
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
-        std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, blockSize, numBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
         ds.writeBlocks(key, writeBlocks);
 
         // write some more blocks, for another key
         std::string newKey = "video.mp4";
         uint32_t newN = 3;
-        uint32_t newNumBytes = newN * blockSize;
+        uint32_t newNumBytes = newN * dataBlockSize;
+        uint32_t newNumTotalBytes = newNumBytes + (newN * sizeof(uint32_t));
+        uint32_t newNumDiskBlocks = ds.getNumDiskBlocks(newNumTotalBytes);
         writeDataBuffers.clear();
-        writeBlocks = BlockUtils::generateNRandom(newKey, newN, blockSize, newNumBytes, writeDataBuffers);
+        writeBlocks = BlockUtils::generateRandom(newKey, dataBlockSize, newNumBytes, writeDataBuffers);
         ds.writeBlocks(newKey, writeBlocks);
 
-        std::cout << ds.freeSpaceMap.toString() << std::endl;
-
         // create a new DiskStorage object - to force an initialisation from file
-        DiskStorage newDs = DiskStorage("rackkey", "store", blockSize, 1u << 10);
+        DiskStorage newDs = DiskStorage("rackkey", "store", diskBlockSize, 1u << 10);
 
+        std::cout << numDiskBlocks << " " << newNumDiskBlocks << std::endl;
         std::cout << newDs.freeSpaceMap.toString() << std::endl;
-
         ASSERT_THAT(newDs.freeSpaceMap.blockCapacity == newDs.getNumDiskBlocks(newDs.header.maxDataSize));
-        for (int i = 0; i < N + newN; i++)
+        for (int i = 0; i < numDiskBlocks + newNumDiskBlocks; i++)
             ASSERT_THAT(newDs.freeSpaceMap.isMapped(i));
-        for (int i = N + newN; i < newDs.freeSpaceMap.blockCapacity; i++)
+        for (int i = numDiskBlocks + newNumDiskBlocks; i < newDs.freeSpaceMap.blockCapacity; i++)
             ASSERT_THAT(!newDs.freeSpaceMap.isMapped(i));
         
         teardown();
@@ -927,30 +940,35 @@ namespace DiskStorageTests
     {
         setup();
 
-        uint32_t blockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", blockSize, 1u << 30);
+        uint32_t dataBlockSize = 40;
+        uint32_t diskBlockSize = 20;
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30);
 
         std::string key = "archive.zip";
         uint32_t N = 5;
-        uint32_t numBytes = N * blockSize;
+        uint32_t numDataBytes = N * dataBlockSize;
+        uint32_t numTotalBytes = numDataBytes + (N * sizeof(uint32_t));
+        uint32_t numDiskBlocksN = ds.getNumDiskBlocks(numTotalBytes);
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
         // write N blocks
-        std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, blockSize, numBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
         ds.writeBlocks(key, writeBlocks);
 
         auto entry = ds.bat.findBATEntry(Crypto::sha256_32(key));
 
         // ensure blocks were correctly written
-        ASSERT_THAT((*entry)->numBytes == numBytes);
+        ASSERT_THAT((*entry)->numBytes == numTotalBytes);
         for (int i = 0; i < N; i++)
             ASSERT_THAT(ds.freeSpaceMap.isMapped(i));
         
         // overwrite with M < N blocks
         uint32_t M = N - 2;
-        numBytes = M * blockSize;
+        numDataBytes = M * dataBlockSize;
+        numTotalBytes = numDataBytes + (M * sizeof(uint32_t));
+        uint32_t numDiskBlocksM = ds.getNumDiskBlocks(numTotalBytes);
         writeDataBuffers.clear();
-        writeBlocks = BlockUtils::generateNRandom(key, M, blockSize, numBytes, writeDataBuffers);
+        writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
         ds.writeBlocks(key, writeBlocks);
 
         entry = ds.bat.findBATEntry(Crypto::sha256_32(key));
@@ -960,12 +978,15 @@ namespace DiskStorageTests
         ASSERT_THAT((*entry)->keyHash == Crypto::sha256_32(key));
 
         // ensure new blocks were correctly written
-        ASSERT_THAT((*entry)->numBytes == numBytes);
-        for (int i = 0; i < M; i++)
+        ASSERT_THAT((*entry)->numBytes == numTotalBytes);
+        for (int i = 0; i < numDiskBlocksM; i++)
             ASSERT_THAT(ds.freeSpaceMap.isMapped(i));
         
+        std::cout << (*entry)->numBytes << std::endl;
+        std::cout << ds.freeSpaceMap.toString() << std::endl;
+        
         // ensure old blocks were de-allocated
-        for (int i = M; i < N; i++)
+        for (int i = numDiskBlocksM; i < numDiskBlocksN; i++)
             ASSERT_THAT(!ds.freeSpaceMap.isMapped(i));
         
         teardown();
@@ -975,24 +996,29 @@ namespace DiskStorageTests
     {
         setup();
 
-        uint32_t blockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", blockSize, 1u << 30);
+        uint32_t dataBlockSize = 40;
+        uint32_t diskBlockSize = 20;
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30);
 
         std::string key1 = "archive.zip";
         uint32_t N = 3;
-        uint32_t numBytes = N * blockSize;
+        uint32_t numDataBytes = N * dataBlockSize;
+        uint32_t numTotalBytes = numDataBytes + (N * sizeof(uint32_t));
+        uint32_t numDiskBlocksKey1 = ds.getNumDiskBlocks(numTotalBytes);
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
         // write N blocks for first key
-        std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key1, N, blockSize, numBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = BlockUtils::generateRandom(key1, dataBlockSize, numDataBytes, writeDataBuffers);
         ds.writeBlocks(key1, writeBlocks);
 
         // write M blocks for second key (doesn't really matter how many)
         std::string key2 = "video.mp4";
         uint32_t M = 5;
-        numBytes = M * blockSize;
+        numDataBytes = M * dataBlockSize;
+        numTotalBytes = numDataBytes + (N * sizeof(uint32_t));
+        uint32_t numDiskBlocksKey2 = ds.getNumDiskBlocks(numTotalBytes);
         writeDataBuffers.clear();
-        writeBlocks = BlockUtils::generateNRandom(key2, M, blockSize, numBytes, writeDataBuffers);
+        writeBlocks = BlockUtils::generateRandom(key2, dataBlockSize, numDataBytes, writeDataBuffers);
         ds.writeBlocks(key2, writeBlocks);
 
         // delete first key (i.e. free first N blocks)
@@ -1001,22 +1027,24 @@ namespace DiskStorageTests
         // write (N + 1) blocks for third key
         // i.e. should skip first free N blocks, and write starting after key2's blocks
         std::string key3 = "shakespeare.txt";
-        numBytes = (N + 1) * blockSize;
+        numDataBytes = (N + 1) * dataBlockSize;
+        numTotalBytes = numDataBytes + ((N+1) * sizeof(uint32_t));
+        uint32_t numDiskBlocksKey3 = ds.getNumDiskBlocks(numTotalBytes);
         writeDataBuffers.clear();
-        writeBlocks = BlockUtils::generateNRandom(key3, (N + 1), blockSize, numBytes, writeDataBuffers);
+        writeBlocks = BlockUtils::generateRandom(key3, dataBlockSize, numDataBytes, writeDataBuffers);
         ds.writeBlocks(key3, writeBlocks);
 
         // ensure `key1`s blocks are unmapped
-        for (int i = 0; i < N; i++)
+        for (int i = 0; i < numDiskBlocksKey1; i++)
             ASSERT_THAT(!ds.freeSpaceMap.isMapped(i));
 
         // ensure `key2`s and `key3`s blocks are mapped
-        for (int i = N; i < N + M + (N + 1); i++)
+        for (int i = numDiskBlocksKey1; i < numDiskBlocksKey1 + (numDiskBlocksKey2 + numDiskBlocksKey3); i++)
             ASSERT_THAT(ds.freeSpaceMap.isMapped(i));
 
         // ensure `key3`s blocks start at block N + M
         auto entry = ds.bat.findBATEntry(Crypto::sha256_32(key3));
-        ASSERT_THAT((*entry)->startingDiskBlockNum == N + M);
+        ASSERT_THAT((*entry)->startingDiskBlockNum == numDiskBlocksKey1 + numDiskBlocksKey2);
 
         teardown();
     }
@@ -1025,10 +1053,12 @@ namespace DiskStorageTests
     {
         setup();
 
-        DiskStorage ds = DiskStorage("rackkey", "store", 4096, 1u << 20);
+        uint32_t diskBlockSize = 4096;
+        uint32_t dataBlockSize = diskBlockSize - sizeof(uint32_t);
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 20);
 
         /**
-         * 1MB max data size (2^20), 4KB block size (2^12) -> 256 (2^8) blocks
+         * 1MB max data size (2^20), 4KB disk block size (2^12) -> 2^8 raw blocks
          */
         uint32_t maxNumBlocks = ds.getNumDiskBlocks(ds.header.maxDataSize);
         ASSERT_THAT(maxNumBlocks == 256);
@@ -1036,10 +1066,11 @@ namespace DiskStorageTests
         // should successfully write N blocks
         std::string key = "archive.zip";
         uint32_t N = 230;
-        uint32_t numBytes = N * ds.header.diskBlockSize;
+        uint32_t numDataBytes = N * dataBlockSize;
+        uint32_t numTotalBytes = numDataBytes + (N * sizeof(uint32_t));
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
-        std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, ds.header.diskBlockSize, numBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
         ds.writeBlocks(key, writeBlocks);
 
         auto entry = ds.bat.findBATEntry(Crypto::sha256_32(key));
@@ -1047,17 +1078,18 @@ namespace DiskStorageTests
 
         // ensure first write was valid
         ASSERT_THAT(batEntry->startingDiskBlockNum == 0);
-        ASSERT_THAT(batEntry->numBytes == numBytes);
+        ASSERT_THAT(batEntry->numBytes == numTotalBytes);
         for (int i = 0; i < N; i++)
             ASSERT_THAT(ds.freeSpaceMap.isMapped(i));
 
         // should fail to write 1 more block than is available
         std::string newKey = "video.mp4";
-        uint32_t newN = (maxNumBlocks - N) + 1;
-        uint32_t newNumBytes = newN * ds.header.diskBlockSize;
+        uint32_t newN = (maxNumBlocks - N);
+        uint32_t newNumDataBytes = newN * ds.header.diskBlockSize;
+        uint32_t newNumTotalBytes = newNumDataBytes + (newN * sizeof(uint32_t));
         writeDataBuffers.clear();
 
-        writeBlocks = BlockUtils::generateNRandom(newKey, newN, ds.header.diskBlockSize, newNumBytes, writeDataBuffers);
+        writeBlocks = BlockUtils::generateRandom(newKey, ds.header.diskBlockSize, newNumDataBytes, writeDataBuffers);
         try 
         {
             ds.writeBlocks(newKey, writeBlocks);
@@ -1065,6 +1097,9 @@ namespace DiskStorageTests
             // shouldn't reach this point - investigate
             std::cout << ds.bat.toString() << std::endl;
             std::cout << ds.freeSpaceMap.toString() << std::endl;
+
+            throw std::logic_error("Write should have failed: line " + std::to_string(__LINE__));
+
             return;
         }
         catch (std::runtime_error& e)
@@ -1074,7 +1109,7 @@ namespace DiskStorageTests
 
         // ensure disk state has been maintained
         ASSERT_THAT(batEntry->startingDiskBlockNum == 0);
-        ASSERT_THAT(batEntry->numBytes == numBytes);
+        ASSERT_THAT(batEntry->numBytes == numTotalBytes);
         for (int i = 0; i < N; i++)
             ASSERT_THAT(ds.freeSpaceMap.isMapped(i));
 
@@ -1096,30 +1131,33 @@ namespace DiskStorageTests
     {
         setup();
 
-        DiskStorage ds = DiskStorage("rackkey", "store", 4096, 1u << 20);
+        uint32_t dataBlockSize = 40;
+        uint32_t diskBlockSize = 20;
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 20);
 
         // should successfully write N blocks
         std::string key = "archive.zip";
         uint32_t N = 10;
-        uint32_t numBytes = N * ds.header.diskBlockSize;
+        uint32_t numDataBytes = N * dataBlockSize;
+        uint32_t numDiskBlocks = ds.getNumDiskBlocks(numDataBytes);
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
-        std::vector<Block> writeBlocks = BlockUtils::generateNRandom(key, N, ds.header.diskBlockSize, numBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
         ds.writeBlocks(key, writeBlocks);
 
         // ensure first write was valid
         auto entry = ds.bat.findBATEntry(Crypto::sha256_32(key));
         auto batEntry = *entry;
         ASSERT_THAT(batEntry->startingDiskBlockNum == 0);
-        ASSERT_THAT(batEntry->numBytes == numBytes);
-        for (int i = 0; i < N; i++)
+        ASSERT_THAT(batEntry->numBytes == numDataBytes + (N * sizeof(uint32_t)));
+        for (int i = 0; i < numDiskBlocks; i++)
             ASSERT_THAT(ds.freeSpaceMap.isMapped(i));
 
         // construct an intentionally broken Block object
         uint32_t newN = 1;
-        uint32_t newNumBytes = N * ds.header.diskBlockSize;
+        uint32_t newNumBytes = N * dataBlockSize;
         writeDataBuffers.clear();
-        writeBlocks = BlockUtils::generateNRandom(key, newN, ds.header.diskBlockSize, newNumBytes, writeDataBuffers);
+        writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, newNumBytes, writeDataBuffers);
 
         /**
          * Setting dataSize to 0 when underlying data is non-zero size
@@ -1143,8 +1181,8 @@ namespace DiskStorageTests
         entry = ds.bat.findBATEntry(Crypto::sha256_32(key));
         batEntry = *entry;
         ASSERT_THAT(batEntry->startingDiskBlockNum == 0);
-        ASSERT_THAT(batEntry->numBytes == numBytes);
-        for (int i = 0; i < N; i++)
+        ASSERT_THAT(batEntry->numBytes == numDataBytes + (N * sizeof(uint32_t)));
+        for (int i = 0; i < numDiskBlocks; i++)
             ASSERT_THAT(ds.freeSpaceMap.isMapped(i));
 
         teardown();

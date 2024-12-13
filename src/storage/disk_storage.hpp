@@ -103,13 +103,14 @@ public:
         std::string storeFileName = "store",
         uint32_t diskBlockSize = 4096,
         uint32_t maxDataSize = 1u << 30,
-        bool removeExistingStore = true
+        bool removeExistingStore = false
     );
 
     ~DiskStorage();
 
     /**
-     * Retreive and return all blocks of the given key.
+     * Retreive and return ALL blocks stored on this node for 
+     * the given `key`.
      * 
      * Throws: 
      *      runtime_error() - on any error during the reading process
@@ -123,10 +124,10 @@ public:
      * We pass this in so that the data the block pointers reference
      * does not get de-allocated.
      */
-    std::vector<Block> readBlocks(std::string key, std::vector<unsigned char> &readBuffer);
+    std::vector<Block> readBlocks(std::string key, uint32_t dataBlockSize, std::vector<unsigned char> &readBuffer);
 
     /**
-     * Write the given blocks for the given key.
+     * Write the given list of blocks `dataBlocks` for the given `key`.
      * 
      * Throws:
      *      runtime_error() - on any error during the writing process
@@ -147,6 +148,15 @@ public:
     void deleteBlocks(std::string key);
 
     /**
+     * Reads `N` raw disk blocks into a buffer, starting at block `startingBlockNum`.
+     * 
+     * NOTE: used for debugging purposes mostly; such 
+     *       buffers can be printed nicely using
+     *       PrintUtils::printVector() (see utils.hpp)
+     */
+    std::vector<unsigned char> readRawDiskBlocks(uint32_t startingDiskBlockNum, uint32_t N);
+
+    /**
      * Returns total size (in bytes) of the store file.
      */
     uint32_t getTotalFileSize();
@@ -157,9 +167,9 @@ public:
     uint32_t getDiskBlockOffset(uint32_t diskBlockNum);
 
     /**
-     * Returns number of disk blocks `numBytes` bytes takes up.
+     * Returns number of disk blocks `numDataBytes` bytes takes up.
      */
-    uint32_t getNumDiskBlocks(uint32_t numBytes);
+    uint32_t getNumDiskBlocks(uint32_t numDataBytes);
 
 private:    
 
@@ -213,14 +223,7 @@ private:
      */
     bool headerValid();
 
-    /**
-     * Reads `N` raw disk blocks into a buffer, starting at block `startingBlockNum`.
-     * 
-     * NOTE: used for debugging purposes mostly; such 
-     *       buffers can be printed nicely using
-     *       PrintUtils::printVector() (see utils.hpp)
-     */
-    std::vector<unsigned char> readRawDiskBlocks(uint32_t startingDiskBlockNum, uint32_t N);
+
 };
 
 ////////////////////////////////////////////

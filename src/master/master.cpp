@@ -433,3 +433,36 @@ int main()
 {
     run();
 }
+
+/*
+TODO:
+    - clean up printing of master, storage and server
+    - time properly
+        - compare same vs different block size times
+        - could swear we saw a slow down switching to different block sizes
+    - get nodes running in docker containers and test with multiple nodes
+    - understand and internalise CAP
+    - implement DEL (both master AND server)
+    - replication
+        - assume all nodes healthy
+    - periodic health checking
+    - sort out documentation
+
+WITH REPLICATION PLAN:
+    GET:
+        - KBN: { key -> {blockNum -> nodeIdList} }
+            - nodeIdList.size() == R, where R is our replication factor
+        - for each block, greedily pick first 'healthy' node (as per latest health check)
+        - build up {nodeId -> blockNumList}
+            - so can query node's blocks in one request
+        - send storage a GET, with blockNumList as payload
+    
+    WRITE:
+        - for each block:
+            - hash(key + blockNum) -> R nodes to store on
+            - i.e. KBN[key][blockNum] = {node0, node1, ... nodeR}
+        - {blockNum -> nodeList} map to build up {nodeId -> blockNumList} map
+        - for each nodeId:
+            - build up vector<Block> blocks
+            - call sendBlocks(nodeId, key, blocks)
+*/
