@@ -90,6 +90,7 @@ public:
             }
         }
 
+        std::cout << "Block distribution:" << std::endl;
         PrintUtils::printMap(nodeBlockCounts);
     }
 
@@ -226,8 +227,6 @@ public:
         req.set_request_uri(U("/" + key));
         req.set_body(payloadBuffer);
 
-        std::cout << "sending to: " << req.absolute_uri().to_string() << std::endl;
-
         pplx::task<void> task = client.request(req)
             // send request
             .then([=](http_response response) 
@@ -259,6 +258,8 @@ public:
      */
     void putHandler(http_request request, const std::string key) 
     {
+        std::cout << "PUT req received: " << key << std::endl;
+
         // Timing point: start
         auto start = std::chrono::high_resolution_clock::now();
             
@@ -272,12 +273,6 @@ public:
         // divide into blocks
         .then([&](std::vector<unsigned char> payload)
         {
-            auto blockStart = std::chrono::high_resolution_clock::now();
-            std::cout << "TIME - extract: " 
-                  << std::chrono::duration_cast<std::chrono::milliseconds>(blockStart - start).count() 
-                  << " ms"
-                  << std::endl;
-            
             *payloadPtr = std::move(payload);
                   
             int payloadSize = payloadPtr->size();
@@ -301,14 +296,6 @@ public:
                 nodeBlockMap[vn->physicalNodeId].push_back(std::move(block));
             }
 
-            std::cout << "Num. of blocks: " << blockCnt << std::endl;
-
-            auto blockEnd = std::chrono::high_resolution_clock::now();
-            std::cout << "TIME - block: " 
-                  << std::chrono::duration_cast<std::chrono::milliseconds>(blockEnd - blockStart).count() 
-                  << " ms"
-                  << std::endl;
-
             return nodeBlockMap;
         })
 
@@ -330,12 +317,6 @@ public:
             return pplx::when_all(sendBlockTasks.begin(), sendBlockTasks.end())
             .then([=]()
             {
-                auto sendEnd = std::chrono::high_resolution_clock::now();
-                std::cout << "TIME - send & receive: " 
-                  << std::chrono::duration_cast<std::chrono::milliseconds>(sendEnd - sendStart).count() 
-                  << " ms"
-                  << std::endl;
-
                 this->keyBlockNodeMap[key] = blockNodeMap;
             });
         });
@@ -436,10 +417,6 @@ int main()
 
 /*
 TODO:
-    - clean up printing of master, storage and server
-    - time properly
-        - compare same vs different block size times
-        - could swear we saw a slow down switching to different block sizes
     - get nodes running in docker containers and test with multiple nodes
     - understand and internalise CAP
     - implement DEL (both master AND server)
