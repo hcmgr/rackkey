@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <functional>
 
 /**
  * For the given `testFunc`, builds a pair of form:

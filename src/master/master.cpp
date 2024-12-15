@@ -169,12 +169,7 @@ public:
             getBlockTasks.push_back(task);
         }
 
-        auto task = pplx::when_all(getBlockTasks.begin(), getBlockTasks.end())
-        .then([=]()
-        {
-            std::cout << "GETs: Finished" << std::endl;
-        });
-
+        auto task = pplx::when_all(getBlockTasks.begin(), getBlockTasks.end());
         task.wait();
 
         // recombine

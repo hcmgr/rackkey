@@ -115,7 +115,7 @@ public:
 
     void startServer() 
     {
-        uri_builder uri("http://localhost:8081");
+        uri_builder uri("http://0.0.0.0:8080");
         auto addr = uri.to_uri().to_string();
         http_listener listener(addr);
 

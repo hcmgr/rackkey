@@ -6,6 +6,7 @@
 
 #include <iostream>
 #include <cstdint>
+#include <filesystem>
 
 using namespace web;
 using namespace web::http;

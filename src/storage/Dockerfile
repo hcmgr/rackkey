@@ -1,26 +1,26 @@
-# Use a base image that can run C++ applications, e.g., Ubuntu
-FROM arm64v8/ubuntu
+FROM ubuntu:20.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install dependencies for running the executable
+# install dependencies
 RUN apt-get update && apt-get install -y \
-    libssl-dev \
-    libcpprest-dev \
+    cmake \
     build-essential \
-    && rm -rf /var/lib/apt/lists/*
+    libcpprest-dev \
+    libssl-dev \
+    vim \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Set the working directory in the container
 WORKDIR /app
 
-# Copy the pre-compiled executable and necessary libraries into the container
-COPY build/storage /app/
+# copy storage AND shared code
+COPY ./storage/CMakeLists.txt /app/
+COPY ./storage /app/storage
+COPY ./shared /app/shared
 
-# If your executable depends on other libraries, you need to copy them as well
-# For example:
-# COPY ./path/to/dependencies /path/in/container
+RUN mkdir build && cd build && cmake .. && make
 
-# Run the executable
-CMD ["./storage"]
+EXPOSE 8080
 
+CMD ["/app/build/storage"]
 

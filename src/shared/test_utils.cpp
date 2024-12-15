@@ -1,6 +1,7 @@
 #include <string>
 #include <iostream>
 #include <iomanip>
+#include <functional>
 
 #include "test_utils.hpp"
 
