@@ -53,20 +53,25 @@ private:
     void createVirtualNodes();
 
 public:
+    /**
+     * Unique id given to physical node
+     */
     int id;
-    std::string ip;
+
+    /**
+     * ip:port combination of physical node
+     */
+    std::string ipPort;
+
     int numVirtualNodes;
     
     /**
-     * List of physical node's virtual nodes.
-     * 
-     * We keep this around so that, when the node is deleted, we know
-     * which virtual nodes to remove (and thus which blocks to re-assign).
+     * Physical node's virtual nodes
      */
     std::vector<std::shared_ptr<VirtualNode>> virtualNodes;
 
     /* Default constructor */
-    PhysicalNode(std::string ip, int numVirtualNodes);
+    PhysicalNode(std::string ipPort, int numVirtualNodes);
 };
 
 /**

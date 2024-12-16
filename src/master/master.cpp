@@ -5,6 +5,7 @@
 #include <map>
 #include <set>
 #include <chrono>
+#include <thread>
 
 #include "hash_ring.hpp"
 #include "utils.hpp"
@@ -48,9 +49,23 @@ public:
     std::map<std::string, std::shared_ptr<std::map<int, int>> > keyBlockNodeMap;
 
     /**
-     * Current open connections 
+     * Stores currently open connections to storage nodes.
+     * 
+     * Mapping is of the form: node id -> http_client object.
      */
     std::map<int, std::shared_ptr<http_client>> openConnections;
+
+    /**
+     * Stores 'health status' of nodes, as per last health check.
+     * 
+     * i.e. ith entry true iff ith node survived last health check, false otherwise.
+     */
+    std::vector<int, bool> nodeHealthMap;
+
+    /**
+     * Thread that periodically performs the node health checks.
+     */
+    std::thread nodeHealthThread;
 
     /**
      * Stores configuration of our service (e.g. storage node IPs)
@@ -74,6 +89,10 @@ public:
     /**
      * Calculates and displays the distribution of the given `key`s blocks
      * across the storage nodes.
+     * 
+     * TODO: 
+     * 
+     * re-factor for replication
      */
     void calculateAndShowBlockDistribution(std::string key) 
     {
@@ -96,6 +115,14 @@ public:
     }
 
     /**
+     * TODO:
+     */
+    void performHealthCheck()
+    {
+
+    }
+
+    /**
      * Retreives all blocks from given physical node
      */
     pplx::task<void> getBlocks(
@@ -109,7 +136,7 @@ public:
 
         // initialise / retreive client
         if (this->openConnections.find(pn->id) == this->openConnections.end())
-            this->openConnections[pn->id] = std::make_shared<http_client>(U(pn->ip));
+            this->openConnections[pn->id] = std::make_shared<http_client>(U(pn->ipPort));
         http_client& client = *this->openConnections[pn->id];
 
         // build request
@@ -250,7 +277,7 @@ public:
 
         // initialise / retreive client
         if (this->openConnections.find(pn->id) == this->openConnections.end())
-            this->openConnections[pn->id] = std::make_shared<http_client>(U(pn->ip));
+            this->openConnections[pn->id] = std::make_shared<http_client>(U(pn->ipPort));
         http_client& client = *this->openConnections[pn->id];
         
         // populate body
@@ -400,7 +427,7 @@ public:
 
         // initialise / retreive client
         if (this->openConnections.find(pn->id) == this->openConnections.end())
-            this->openConnections[pn->id] = std::make_shared<http_client>(U(pn->ip));
+            this->openConnections[pn->id] = std::make_shared<http_client>(U(pn->ipPort));
         http_client& client = *this->openConnections[pn->id];
 
         // build and send request
@@ -549,9 +576,13 @@ public:
 
         try 
         {
+            // start request listener
             listener
                 .open()
                 .then([&addr](){ std::cout << "Master server is listening at: " << addr << std::endl; });
+            
+            // TODO: start health check thread
+
             while (1);
         } 
         catch (const std::exception& e) 
@@ -589,8 +620,24 @@ namespace MasterServerTests {
         for (int i = 0; i < paths.size(); i++)
         {
             auto p = ApiUtils::parsePath(paths[i]);
-            std::cout << p.first << " " << p.second << std::endl;
-            // ASSERT_THAT(p == expectedParsedPaths[i]);
+            // std::cout << p.first << " " << p.second << std::endl;
+            ASSERT_THAT(p == expectedParsedPaths[i]);
+        }
+    }
+
+    void runAll()
+    {
+        std::cerr << "###################################" << std::endl;
+        std::cerr << "MasterServer Tests" << std::endl;
+        std::cerr << "###################################" << std::endl;
+
+        std::vector<std::pair<std::string, std::function<void()>>> tests = {
+            TEST(testParsePath)
+        };
+
+        for (auto &[name, func] : tests)
+        {
+            TestUtils::runTest(name, func);
         }
     }
 };
@@ -602,9 +649,11 @@ namespace MasterServerTests {
 
 void run()
 {    
-    std::string configFilePath = "../config.json";
-    MasterServer masterServer = MasterServer(configFilePath);
-    masterServer.startServer();
+    // std::string configFilePath = "../config.json";
+    // MasterServer masterServer = MasterServer(configFilePath);
+    // masterServer.startServer();
+
+    MasterServerTests::runAll();
 }
 
 int main() 
@@ -614,10 +663,13 @@ int main()
 
 /*
 TODO:
+    - replication
+        - move physicalNode from hash_ring to master, an rename StorageNode
+        - makes it clearer what we're working with, and makes connection more explicit, 
+          and makes health check map init that little bit easier
     - adding / removing nodes 
     - periodic health checking
         - assume all nodes healthy for now
-    - replication
     - master restarting
         - i.e. if it goes down, it needs to re-build its view of the world
     - implement DEL (both master AND server)
@@ -644,6 +696,8 @@ WITH REPLICATION PLAN:
         - build up {nodeId -> blockNumList}
             - so can query node's blocks in one request
         - send storage a GET, with blockNumList as payload
+            - storage node will obviously read all `key`s blocks
+            - will just return those it was asked for
     
     WRITE:
         - for each block:

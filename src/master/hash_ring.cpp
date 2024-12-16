@@ -34,7 +34,7 @@ std::string VirtualNode::toString()
 /* Default constructor */
 PhysicalNode::PhysicalNode(std::string ip, int numVirtualNodes)
     : id(idGenerator++),
-      ip(ip),
+      ipPort(ip),
       numVirtualNodes(numVirtualNodes)
 {
     createVirtualNodes();
@@ -52,7 +52,7 @@ void PhysicalNode::createVirtualNodes()
 
     std::string virtualNodeId;
     for (int i = 0; i < this->numVirtualNodes; i++) {
-        virtualNodeId = this->ip + ":" + std::to_string(i);
+        virtualNodeId = this->ipPort + ":" + std::to_string(i);
         std::shared_ptr<VirtualNode> vn = std::make_shared<VirtualNode>(virtualNodeId, id);
         this->virtualNodes[i] = vn;
     }

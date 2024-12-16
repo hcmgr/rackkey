@@ -7,5 +7,6 @@
 
     ],
     "numVirtualNodes": 50,
-    "blockSize": 4096
+    "blockSize": 4096,
+    "replicationFactor": 3
 }
