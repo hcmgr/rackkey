@@ -23,26 +23,6 @@ namespace ApiUtils {
         responseJson[U("status")] = json::value::number(code);
         return responseJson;
     }
-
-    /**
-     * Splits the api path into a prefix and final parameter.
-     * 
-     * E.g.
-     * "/api/store/archive.zip" - returns {"/api/store/", "archive.zip"}
-     * 
-     * E.g.
-     * "/store/node1" - returns {"/store/", "node1"}
-     * 
-     * E.g.
-     * "/something.csv" - returns {"/", "something.csv"}
-     */
-    std::pair<std::string, std::string> splitApiPath(const std::string& relPath)
-    {
-        size_t lastSlashPos = relPath.find_last_of('/');
-        if (lastSlashPos == std::string::npos || lastSlashPos == relPath.size() - 1) 
-            return {};
-        return {relPath.substr(0, lastSlashPos + 1) , relPath.substr(lastSlashPos + 1)};
-    }
 };
 
 namespace PrintUtils {

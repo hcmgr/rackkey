@@ -1,0 +1,1 @@
+curl -X DEL localhost:9000/store/small_shakespeare.txt

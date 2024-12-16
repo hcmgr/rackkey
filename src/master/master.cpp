@@ -9,6 +9,7 @@
 #include "utils.hpp"
 #include "config.hpp"
 #include "block.hpp"
+#include "test_utils.hpp"
 
 using namespace web;
 using namespace web::http;
@@ -18,14 +19,15 @@ using namespace web::http::experimental::listener;
 class MasterServer 
 {
 private:
-    /**
-     * Create and add our pre-defined storage nodes to the hash ring.
-     */
-    void addInitialStorageNodes() {
-        for (std::string ip : this->config.storageNodeIPs) {
-            hashRing.addNode(ip, this->config.numVirtualNodes);
-        }
+
+/**
+ * Create and add our pre-defined storage nodes to the hash ring.
+ */
+void addInitialStorageNodes() {
+    for (std::string ip : this->config.storageNodeIPs) {
+        hashRing.addNode(ip, this->config.numVirtualNodes);
     }
+}
 
 public:
     /**
@@ -69,28 +71,26 @@ public:
     }
 
     /**
-     * Calculates and displays the blocks distribution
+     * Calculates and displays the distribution of the given `key`s blocks
      * across the storage nodes.
      */
-    void calculateAndShowBlockDistribution() 
+    void calculateAndShowBlockDistribution(std::string key) 
     {
-        std::map<int, int> nodeBlockCounts;
-
-        for (auto p : this->keyBlockNodeMap) 
+        std::map<int, int> nodeBlockCounts; // node id -> block count
+        int totalNumBlocks = this->keyBlockNodeMap[key]->size();
+        
+        for (auto p : *(this->keyBlockNodeMap[key]))
         {
-            std::string key = p.first;
-            std::shared_ptr<std::map<int, int>> blockNodeMap = p.second;
+            int nodeId = p.second;
 
-            for (auto p : *blockNodeMap) 
-            {
-                if (nodeBlockCounts.find(p.second) == nodeBlockCounts.end())
-                    nodeBlockCounts[p.second] = 0;
+            if (nodeBlockCounts.find(nodeId) == nodeBlockCounts.end())
+                nodeBlockCounts[nodeId] = 0;
 
-                nodeBlockCounts[p.second]++;
-            }
+            nodeBlockCounts[nodeId]++;
         }
 
-        std::cout << "Block distribution:" << std::endl;
+        std::cout << "Blocks: " << totalNumBlocks << std::endl;
+        std::cout << "Distribution:" << std::endl;
         PrintUtils::printMap(nodeBlockCounts);
     }
 
@@ -145,9 +145,20 @@ public:
     {
         std::cout << "GET req received: " << key << std::endl;
 
+        // check key exists
+        if (this->keyBlockNodeMap.find(key) == this->keyBlockNodeMap.end())
+        {
+            std::cout << "GET: failed - key doesn't exist" << std::endl;
+            http_response response(status_codes::BadRequest);
+            request.reply(response);
+            return;
+        }
+
         std::shared_ptr<std::map<int, int>> blockNodeMap = this->keyBlockNodeMap[key];
         
-        // build up node->block map
+        /**
+         * Build up a mapping of the form: {node id -> block numbers}
+         */
         std::map<int, std::vector<int>> nodeBlockMap;
         for (auto p : *(blockNodeMap))        
         {
@@ -156,6 +167,8 @@ public:
             nodeBlockMap[nodeId].push_back(blockNum);
         }
 
+        // mapping of the form: {block num. -> block object}
+        // NOTE: each call to `getBlocks` builds this up
         auto blockMap = std::make_shared<std::map<int, Block>>();
         
         // call 'getBlocks' for each node, sending block nums as payload
@@ -176,11 +189,11 @@ public:
         std::vector<unsigned char> payloadBuffer;
         for (auto p : *(blockMap))
         {
-            int blockNum = p.first;
             Block block = p.second;
-
             payloadBuffer.insert(payloadBuffer.end(), block.dataStart, block.dataEnd);
         }
+
+        std::cout << "GET: successful" << std::endl;
 
         // send response
         http_response response(status_codes::OK);
@@ -258,10 +271,10 @@ public:
         // Timing point: start
         auto start = std::chrono::high_resolution_clock::now();
             
-        std::shared_ptr<std::map<int, int>> blockNodeMap = std::make_shared<std::map<int, int>>();
-        std::vector<pplx::task<void>> sendBlockTasks;
+        auto blockNodeMap = std::make_shared<std::map<int, int>>();
+        auto payloadPtr = std::make_shared<std::vector<unsigned char>>();
 
-        std::shared_ptr<std::vector<unsigned char>> payloadPtr = std::make_shared<std::vector<unsigned char>>();
+        std::vector<pplx::task<void>> sendBlockTasks;
 
         pplx::task<void> task = request.extract_vector()
 
@@ -318,17 +331,17 @@ public:
         
         task.wait();
 
-        calculateAndShowBlockDistribution();
+        calculateAndShowBlockDistribution(key);
 
         // Timing point: end
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
         std::cout << "Total Time: " << duration.count() << " ms" << std::endl;
 
-        // send response
+        std::cout << "PUT: successful" << std::endl;
+
+        // send response - empty body for now
         http_response response(status_codes::OK);
-        json::value responseBody = ApiUtils::statusResponse(status_codes::OK);
-        response.set_body(responseBody);
         request.reply(response);
         return;
     }
@@ -341,21 +354,51 @@ public:
      */
     void deleteHandler(http_request request, const std::string key) 
     {
+        std::cout << "DEL req received: " << key << std::endl;
+
+        std::vector<pplx::task<void>> delBlockTasks;
+
+        /**
+         * - Find out nodes that have `key`s blocks
+         * - ask them to remove all blocks for `key`
+         */
+    }
+
+    /**
+     * GET
+     * ---
+     * Returns newline-separated list of all keys.
+     */
+    void getKeysHandler(http_request request) 
+    {
+        std::cout << "GET /keys req received" << std::endl;
+
+        std::ostringstream oss;
+        for (const auto &p : keyBlockNodeMap)
+            oss << p.first << "\n";
+        
+        request.reply(status_codes::OK, oss.str());
     }
 
     void router(http_request request) {
-        auto p = ApiUtils::splitApiPath(request.relative_uri().to_string());
+        auto p = parsePath(request.relative_uri().to_string());
         std::string endpoint = p.first;
-        std::string key = p.second;
+        std::string param = p.second;
 
-        if (endpoint == U("/store/"))
+        if (endpoint == U("/store"))
         {
             if (request.method() == methods::GET)
-                this->getHandler(request, key);
+                this->getHandler(request, param);
             if (request.method() == methods::PUT)
-                this->putHandler(request, key);
+                this->putHandler(request, param);
             if (request.method() == methods::DEL)
-                this->deleteHandler(request, key);
+                this->deleteHandler(request, param);
+        }
+
+        else if (endpoint == U("/keys") && param == U(""))
+        {
+            if (request.method() == methods::GET)
+                this->getKeysHandler(request);
         }
 
         else 
@@ -384,6 +427,39 @@ public:
             std::cout << "An error occurred: " << e.what() << std::endl;
         }
     }
+
+    /**
+     * Utility function to parse the given uri into a {path, param} pair.
+     * 
+     * E.g.
+     * 
+     * "/store/key1" OR "/store/key1/" -> {"/store", "key1"}
+     * 
+     * E.g.
+     * 
+     * "/keys" OR "/keys/" -> {"/keys", ""}
+     */
+    std::pair<std::string, std::string> parsePath(const std::string &uri) 
+    {
+        std::string cleanUri = uri;
+
+        // remove ending '/', if present
+        if (cleanUri[cleanUri.size() - 1] == '/')
+            cleanUri = cleanUri.substr(0, cleanUri.size() - 1);
+
+        size_t lastSlashPos = cleanUri.find_last_of('/');
+
+        if (lastSlashPos == std::string::npos)
+            return {cleanUri, ""};
+        
+        if (lastSlashPos == 0)
+            return {cleanUri, ""};
+
+        std::string prefix = cleanUri.substr(0, lastSlashPos);
+        std::string key = cleanUri.substr(lastSlashPos + 1);
+
+        return {prefix.empty() ? cleanUri : prefix, key};
+    } 
 };
 
 ////////////////////////////////////////////
@@ -391,6 +467,33 @@ public:
 ////////////////////////////////////////////
 
 namespace MasterServerTests {
+    void testParsePath()
+    {
+        MasterServer ms("../config.json");
+
+        std::vector<std::string> paths = {
+            "/store/archive.zip",
+            "/store/archive.zip/",
+
+            "/keys",
+            "/keys/"
+        };
+
+        std::vector<std::pair<std::string, std::string>> expectedParsedPaths = {
+            {"/store", "archive.zip"},
+            {"/store", "archive.zip"},
+
+            {"/keys", ""},
+            {"/keys", ""}
+        };
+
+        for (int i = 0; i < paths.size(); i++)
+        {
+            auto p = ms.parsePath(paths[i]);
+            std::cout << p.first << " " << p.second << std::endl;
+            // ASSERT_THAT(p == expectedParsedPaths[i]);
+        }
+    }
 };
 
 
@@ -412,12 +515,18 @@ int main()
 
 /*
 TODO:
-    - get nodes running in docker containers and test with multiple nodes
-    - understand and internalise CAP
     - implement DEL (both master AND server)
+    - implement GET keys
+    - group together and separate out handlers into nice abstraction
+    - figure out why block allocations are not consistent
+      across tests of the same files
+    - understand and internalise CAP
     - replication
-        - assume all nodes healthy
+        - assume all nodes healthy for now
+
     - periodic health checking
+    - implement concurrent r/w protections for DiskStorage
+        - see bottom of server.cpp for plan
     - sort out documentation
 
 WITH REPLICATION PLAN:

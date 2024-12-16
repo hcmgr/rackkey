@@ -143,8 +143,16 @@ API (master -> cluster node)
 
 Re-assignment:
     - when node added/deleted, blocks are re-assigned
-    - this causes an update to the hash table, but blocks also need to be transferred
-      between storage nodes
+    - add M:
+        - Have L, N  -> L, M, N
+        - re-assign some of N's nodes to M
+    - remove M:
+        - Have L, M, N
+        - re-assign all M's nodes to N
+    - re-assigning:
+        - update to hash table AND;
+        - moving the actual blocks
+    - 
     - options:
         - node-node comm.:
             - i.e. storage nodes resolve this directly

@@ -20,17 +20,6 @@ namespace ApiUtils {
      * Creates a json response object with a single http status field
      */
     json::value statusResponse(status_code code);
-
-    /**
-     * Splits the api path into a prefix and final parameter.
-     * 
-     * E.g.
-     * "/api/store/archive.zip" - returns {"/api/store", "archive.zip"}
-     * 
-     * E.g.
-     * "/add/node1" - returns {"/add", "node1"}
-     */
-    std::pair<std::string, std::string> splitApiPath(const std::string& relPath);
 };
     
 namespace PrintUtils {
