@@ -226,7 +226,7 @@ public:
 
         std::cout << "GET: successful" << std::endl;
 
-        // send response
+        // success response
         http_response response(status_codes::OK);
         response.set_body(payloadBuffer);
         request.reply(response);
@@ -444,9 +444,7 @@ public:
             return;
         }
 
-        /**
-         * Find all nodes that store at least 1 block for `key`.
-         */
+        // Find all nodes that store at least 1 block for `key`
         std::set<int> nodeIds;
         std::shared_ptr<std::map<int, int>> blockNodeMap = this->keyBlockNodeMap[key];
 
@@ -485,10 +483,12 @@ public:
 
         if (!success)
             return;
+        
+        // remove key's entry from KBN entirely
+        this->keyBlockNodeMap.erase(key);
 
+        // success response
         std::cout << "DEL: successful" << std::endl;
-
-        // send response
         request.reply(status_codes::OK);
         return;
     }
