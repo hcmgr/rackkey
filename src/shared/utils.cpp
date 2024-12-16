@@ -23,6 +23,39 @@ namespace ApiUtils {
         responseJson[U("status")] = json::value::number(code);
         return responseJson;
     }
+
+    /**
+     * Utility function to parse the given uri into a {path, param} pair.
+     * 
+     * E.g.
+     * 
+     * "/store/key1" OR "/store/key1/" -> {"/store", "key1"}
+     * 
+     * E.g.
+     * 
+     * "/keys" OR "/keys/" -> {"/keys", ""}
+     */
+    std::pair<std::string, std::string> parsePath(const std::string &uri) 
+    {
+        std::string cleanUri = uri;
+
+        // remove ending '/', if present
+        if (cleanUri[cleanUri.size() - 1] == '/')
+            cleanUri = cleanUri.substr(0, cleanUri.size() - 1);
+
+        size_t lastSlashPos = cleanUri.find_last_of('/');
+
+        if (lastSlashPos == std::string::npos)
+            return {cleanUri, ""};
+        
+        if (lastSlashPos == 0)
+            return {cleanUri, ""};
+
+        std::string prefix = cleanUri.substr(0, lastSlashPos);
+        std::string key = cleanUri.substr(lastSlashPos + 1);
+
+        return {prefix.empty() ? cleanUri : prefix, key};
+    } 
 };
 
 namespace PrintUtils {

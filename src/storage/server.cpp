@@ -35,6 +35,8 @@ public:
 
     /**
      * Retreives blocks of the given `key` from storage.
+     * 
+     * TODO: fix hard coding of block size
      */
     void getHandler(http_request request, std::string key)
     {
@@ -51,6 +53,8 @@ public:
         catch (std::runtime_error &e)
         {
             std::cout << e.what() << std::endl;
+            request.reply(status_codes::InternalError);
+            return;
         }
         
         // serialize
@@ -91,26 +95,36 @@ public:
             catch (std::runtime_error &e)
             {
                 std::cout << e.what() << std::endl;
+                request.reply(status_codes::InternalError);
+                return;
             }
 
         });
 
         task.wait();
 
-        // std::cout << diskStorage.bat.toString() << std::endl;
-
         request.reply(status_codes::OK);
         return;
     }
     
     /**
-     * Deletes `key`s data from storage.
-     * 
-     * TODO:
+     * Deletes all blocks of the given `key` from this node.
      */
     void deleteHandler(http_request request, std::string key)
     {
-        std::cout << "PUT req received: " << key << std::endl;
+        std::cout << "DEL req received: " << key << std::endl;
+        try
+        {
+            diskStorage.deleteBlocks(key);
+        }
+        catch (std::runtime_error &e)
+        {
+            std::cout << e.what() << std::endl;
+            request.reply(status_codes::InternalError);
+        }
+
+        request.reply(status_codes::OK);
+        return;
     }
 
     void startServer() 
@@ -134,11 +148,11 @@ public:
     }
 
     void router(http_request request) {
-        auto p = ApiUtils::splitApiPath(request.relative_uri().to_string());
+        auto p = ApiUtils::parsePath(request.relative_uri().to_string());
         std::string endpoint = p.first;
         std::string key = p.second;
 
-        if (endpoint == U("/"))
+        if (endpoint == U("/store"))
         {
             if (request.method() == methods::GET)
                 this->getHandler(request, key);
@@ -174,7 +188,7 @@ Immediate todo:
     - checks in server.cpp that:
         - blocks are in correct order (disk_storage presumes they are)
         - first (blockNum - 1) blocks are full
-    - handle hash collisions:
+    - handle hash collisions of hash(key)
         - heh?
     - handle concurrent r/w of storeFile (below)
 

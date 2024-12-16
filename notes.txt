@@ -145,20 +145,16 @@ Re-assignment:
     - when node added/deleted, blocks are re-assigned
     - add M:
         - Have L, N  -> L, M, N
-        - re-assign some of N's nodes to M
+        - re-assign some of N's blocks to M
     - remove M:
         - Have L, M, N
-        - re-assign all M's nodes to N
+        - re-assign all M's blocks to N
     - re-assigning:
-        - update to hash table AND;
-        - moving the actual blocks
-    - 
-    - options:
-        - node-node comm.:
-            - i.e. storage nodes resolve this directly
-            - probs don't want fully connected graph of storage nodes
-        - master-node comm.:
-            - expose addBlock/ and deleteBlock/ endpoints
-            - i.e. for each re-assigned block:
-                - send old node an deleteBlock/ req
-                - send new node an addBlock/ req
+        - already have `old` block->node assignments
+        - using `old` block->node assignments, figure out which
+          blocks need to be moved
+    - problem:
+        - say key1 gets divided into block chunks [1,2,3] (across 3 nodes)
+        - on each node, chunk of blocks are stored contiguously
+        - when we re-assign, some blocks in that chunk will be moved
+            

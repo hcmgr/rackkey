@@ -100,8 +100,6 @@ public:
     /* Default constructor */
     HashRing();
 
-
-
     /**
      * Creates a physical node for the given ip and adds it to the ring.
      * 
@@ -138,6 +136,7 @@ namespace HashRingTests
      * Returns list of N sequential ip addresses starting from baseIP
      */
     std::vector<std::string> setupRandomIPs(std::string baseIP, int N);
+
     void testHashRingFindNextNode();
     void testHashRingEvenlyDistributed();
 };

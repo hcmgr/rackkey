@@ -20,6 +20,19 @@ namespace ApiUtils {
      * Creates a json response object with a single http status field
      */
     json::value statusResponse(status_code code);
+
+    /**
+     * Utility function to parse the given uri into a {path, param} pair.
+     * 
+     * E.g.
+     * 
+     * "/store/key1" OR "/store/key1/" -> {"/store", "key1"}
+     * 
+     * E.g.
+     * 
+     * "/keys" OR "/keys/" -> {"/keys", ""}
+     */
+    std::pair<std::string, std::string> parsePath(const std::string &uri);
 };
     
 namespace PrintUtils {

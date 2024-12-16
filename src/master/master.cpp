@@ -3,6 +3,7 @@
 #include <cpprest/http_client.h>
 #include <iostream>
 #include <map>
+#include <set>
 #include <chrono>
 
 #include "hash_ring.hpp"
@@ -114,14 +115,18 @@ public:
         // build request
         http_request req = http_request();
         req.set_method(methods::GET);
-        req.set_request_uri(U("/" + key));
-        // TODO: set body to blockNums encoded as unsigned chars
+        req.set_request_uri(U("/store/" + key));
 
         auto payloadPtr = std::make_shared<std::vector<unsigned char>>();
 
         return client.request(req)
         .then([=](http_response response)
         {
+            if (response.status_code() != status_codes::OK)
+            {
+                throw std::runtime_error(
+                    "getBlocks() failed with status: " + std::to_string(response.status_code()));
+            }
             return response.extract_vector();
         })
         .then([=](std::vector<unsigned char> payload)
@@ -140,6 +145,11 @@ public:
      * ---
      * Given: (KEY)
      * Requests all blocks for the given KEY from the storage cluster, returns in order
+     * 
+     * NOTE: TODO:
+     * 
+     * At the moment, we don't send block numbers to get.
+     * Will likely needs this in the future.
      */
     void getHandler(http_request request, const std::string key) 
     {
@@ -149,8 +159,7 @@ public:
         if (this->keyBlockNodeMap.find(key) == this->keyBlockNodeMap.end())
         {
             std::cout << "GET: failed - key doesn't exist" << std::endl;
-            http_response response(status_codes::BadRequest);
-            request.reply(response);
+            request.reply(status_codes::InternalError);
             return;
         }
 
@@ -171,7 +180,10 @@ public:
         // NOTE: each call to `getBlocks` builds this up
         auto blockMap = std::make_shared<std::map<int, Block>>();
         
-        // call 'getBlocks' for each node, sending block nums as payload
+        /**
+         * Call `getBlocks` for each node and wait on all tasks 
+         * to finish.
+         */
         std::vector<pplx::task<void>> getBlockTasks;
         for (auto p : nodeBlockMap)
         {
@@ -182,8 +194,27 @@ public:
             getBlockTasks.push_back(task);
         }
 
-        auto task = pplx::when_all(getBlockTasks.begin(), getBlockTasks.end());
+        bool success = true;
+        auto task = pplx::when_all(getBlockTasks.begin(), getBlockTasks.end())
+        .then([&request, &success](pplx::task<void> allTasks)
+        {
+            try 
+            {
+                allTasks.get();
+            }
+            catch (const std::exception& e)
+            {
+                std::cout << "GET: failed - " << e.what() << std::endl;
+                success = false;
+
+                request.reply(status_codes::InternalError);
+            }
+        });
+
         task.wait();
+
+        if (!success)
+            return;
 
         // recombine
         std::vector<unsigned char> payloadBuffer;
@@ -232,17 +263,17 @@ public:
         // build request
         http_request req = http_request();
         req.set_method(methods::PUT);
-        req.set_request_uri(U("/" + key));
+        req.set_request_uri(U("/store/" + key));
         req.set_body(payloadBuffer);
 
         pplx::task<void> task = client.request(req)
             // send request
             .then([=](http_response response) 
             {
-                if (response.status_code() == status_codes::OK) {
-                    json::value jsonResponse = response.extract_json().get();
-                } else {
-                    std::cout << "Request failed with status: " << response.status_code() << std::endl;
+                if (response.status_code() != status_codes::OK) 
+                {
+                    throw std::runtime_error(
+                        "sendBlocks() failed with status: " + std::to_string(response.status_code()));
                 }
             })
 
@@ -275,6 +306,7 @@ public:
         auto payloadPtr = std::make_shared<std::vector<unsigned char>>();
 
         std::vector<pplx::task<void>> sendBlockTasks;
+        bool success = true;
 
         pplx::task<void> task = request.extract_vector()
 
@@ -323,13 +355,26 @@ public:
 
             // wait for 'send' tasks
             return pplx::when_all(sendBlockTasks.begin(), sendBlockTasks.end())
-            .then([=]()
+            .then([&](pplx::task<void> allTasks)
             {
-                this->keyBlockNodeMap[key] = blockNodeMap;
+                try
+                {
+                    allTasks.get();
+                    this->keyBlockNodeMap[key] = blockNodeMap;
+                }
+                catch (const std::exception& e)
+                {
+                    std::cout << "PUT: failed - " << e.what() << std::endl;
+                    success = false;
+                    request.reply(status_codes::InternalError);
+                }
             });
         });
         
         task.wait();
+
+        if (!success)
+            return;
 
         calculateAndShowBlockDistribution(key);
 
@@ -347,21 +392,105 @@ public:
     }
 
     /**
+     * Deletes all blocks correpsonding to key `key` from node with id `physicalNodeId`.
+     */
+    pplx::task<void> deleteBlocks(int physicalNodeId, std::string key)
+    {
+        std::shared_ptr<PhysicalNode> pn = this->hashRing.getPhysicalNode(physicalNodeId);
+
+        // initialise / retreive client
+        if (this->openConnections.find(pn->id) == this->openConnections.end())
+            this->openConnections[pn->id] = std::make_shared<http_client>(U(pn->ip));
+        http_client& client = *this->openConnections[pn->id];
+
+        // build and send request
+        http_request req = http_request();
+        req.set_method(methods::DEL);
+        req.set_request_uri(U("/store/" + key));
+
+        auto task = client.request(req)
+        .then([=](http_response response)
+        {
+            if (response.status_code() != status_codes::OK)
+            {
+                throw std::runtime_error(
+                    "deleteBlocks() failed with status: " + std::to_string(response.status_code()));
+            }
+        });
+
+        return task;
+    }
+
+    /**
      * DELETE
      * ---
      * Given: (KEY)
      * Deletes all blocks of the given KEY from the storage cluster
+     * 
+     * NOTE: TODO:
+     * 
+     * At the moment, we don't send block numbers to delete.
+     * Will likely needs this in the future.
      */
     void deleteHandler(http_request request, const std::string key) 
     {
         std::cout << "DEL req received: " << key << std::endl;
 
-        std::vector<pplx::task<void>> delBlockTasks;
+        // check key exists
+        if (this->keyBlockNodeMap.find(key) == this->keyBlockNodeMap.end())
+        {
+            std::cout << "DEL: failed - key doesn't exist" << std::endl;
+            request.reply(status_codes::InternalError);
+            return;
+        }
 
         /**
-         * - Find out nodes that have `key`s blocks
-         * - ask them to remove all blocks for `key`
+         * Find all nodes that store at least 1 block for `key`.
          */
+        std::set<int> nodeIds;
+        std::shared_ptr<std::map<int, int>> blockNodeMap = this->keyBlockNodeMap[key];
+
+        for (auto p : *(blockNodeMap))
+        {
+            int nodeId = p.second;
+            nodeIds.insert(nodeId);
+        }
+
+        std::vector<pplx::task<void>> delBlockTasks;
+
+        // call `deleteBlocks` for each node
+        for (int nodeId : nodeIds)
+        {
+            auto task = deleteBlocks(nodeId, key);
+            delBlockTasks.push_back(task);
+        }
+
+        bool success = true;
+        auto task = pplx::when_all(delBlockTasks.begin(), delBlockTasks.end())
+        .then([&](pplx::task<void> allTasks)
+        {
+            try
+            {
+                allTasks.get();
+            }
+            catch (const std::exception& e)
+            {
+                std::cout << "DEL: failed - " << e.what() << std::endl;
+                success = false;
+                request.reply(status_codes::InternalError);
+            }
+        });
+
+        task.wait();
+
+        if (!success)
+            return;
+
+        std::cout << "DEL: successful" << std::endl;
+
+        // send response
+        request.reply(status_codes::OK);
+        return;
     }
 
     /**
@@ -381,7 +510,7 @@ public:
     }
 
     void router(http_request request) {
-        auto p = parsePath(request.relative_uri().to_string());
+        auto p = ApiUtils::parsePath(request.relative_uri().to_string());
         std::string endpoint = p.first;
         std::string param = p.second;
 
@@ -418,48 +547,18 @@ public:
             this->router(request);
         });
 
-        try {
+        try 
+        {
             listener
                 .open()
                 .then([&addr](){ std::cout << "Master server is listening at: " << addr << std::endl; });
             while (1);
-        } catch (const std::exception& e) {
+        } 
+        catch (const std::exception& e) 
+        {
             std::cout << "An error occurred: " << e.what() << std::endl;
         }
     }
-
-    /**
-     * Utility function to parse the given uri into a {path, param} pair.
-     * 
-     * E.g.
-     * 
-     * "/store/key1" OR "/store/key1/" -> {"/store", "key1"}
-     * 
-     * E.g.
-     * 
-     * "/keys" OR "/keys/" -> {"/keys", ""}
-     */
-    std::pair<std::string, std::string> parsePath(const std::string &uri) 
-    {
-        std::string cleanUri = uri;
-
-        // remove ending '/', if present
-        if (cleanUri[cleanUri.size() - 1] == '/')
-            cleanUri = cleanUri.substr(0, cleanUri.size() - 1);
-
-        size_t lastSlashPos = cleanUri.find_last_of('/');
-
-        if (lastSlashPos == std::string::npos)
-            return {cleanUri, ""};
-        
-        if (lastSlashPos == 0)
-            return {cleanUri, ""};
-
-        std::string prefix = cleanUri.substr(0, lastSlashPos);
-        std::string key = cleanUri.substr(lastSlashPos + 1);
-
-        return {prefix.empty() ? cleanUri : prefix, key};
-    } 
 };
 
 ////////////////////////////////////////////
@@ -489,7 +588,7 @@ namespace MasterServerTests {
 
         for (int i = 0; i < paths.size(); i++)
         {
-            auto p = ms.parsePath(paths[i]);
+            auto p = ApiUtils::parsePath(paths[i]);
             std::cout << p.first << " " << p.second << std::endl;
             // ASSERT_THAT(p == expectedParsedPaths[i]);
         }
@@ -515,19 +614,27 @@ int main()
 
 /*
 TODO:
-    - implement DEL (both master AND server)
-    - implement GET keys
-    - group together and separate out handlers into nice abstraction
-    - figure out why block allocations are not consistent
-      across tests of the same files
-    - understand and internalise CAP
-    - replication
-        - assume all nodes healthy for now
-
+    - adding / removing nodes 
     - periodic health checking
+        - assume all nodes healthy for now
+    - replication
+    - master restarting
+        - i.e. if it goes down, it needs to re-build its view of the world
+    - implement DEL (both master AND server)
+    - understand and internalise CAP
     - implement concurrent r/w protections for DiskStorage
         - see bottom of server.cpp for plan
+    - make .then() code non-blocking (related to concurrent r/w)
+    - group together and separate out handlers into nice abstraction
+    
     - sort out documentation
+    - potentially:
+        - return JSON
+        - reason:
+            - if CURL is too clunky, might want to write our own lightweight client
+            - in that case, MasterServer could return JSON, and our client process
+              that JSON.
+            - for now, CURL is great, its just something to think about
 
 WITH REPLICATION PLAN:
     GET:
@@ -546,4 +653,25 @@ WITH REPLICATION PLAN:
         - for each nodeId:
             - build up vector<Block> blocks
             - call sendBlocks(nodeId, key, blocks)
+
+ADDING / REMOVING NODES PLAN:
+    - want to NOTIFY MasterServer of a new node in via an authenticated API call
+    - real challenge is re-allocation
+    - also need to figure out how actually tell MasterServer
+        that another storage server exists
+    - we can easily spin up another storage server
+        - but do we manually set its ID?
+        - we ideally want to do this quickly and in an automated fashion
+    - plan: 
+        - /register-node:POST endpoint
+        - authenticated by an API key / token
+        - gives ip:port and nodeId
+        - then, MasterServer performs the re-balancing
+            - how to deal with the downtime of this? (see CAP)
+
+MASTER RESTARTING:
+    - either:
+        - persist master's critical state to disk
+            - simple, small format
+        - completely re-build by querying storage nodes
 */
