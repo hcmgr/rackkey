@@ -747,12 +747,10 @@ int main()
 
 /*
 TODO:
-    - health checking
     - replication
     - adding / removing nodes 
     - master restarting
         - i.e. if it goes down, it needs to re-build its view of the world
-    - implement DEL (both master AND server)
     - understand and internalise CAP
     - implement concurrent r/w protections for DiskStorage
         - see bottom of server.cpp for plan
