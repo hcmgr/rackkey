@@ -1,11 +1,13 @@
 #include <cpprest/http_listener.h>
 #include <cpprest/json.h>
 #include <cpprest/http_client.h>
+
 #include <iostream>
 #include <map>
 #include <set>
 #include <chrono>
 #include <thread>
+#include <mutex>
 
 #include "storage_node.hpp"
 #include "hash_ring.hpp"
@@ -31,24 +33,25 @@ private:
         for (std::string ipPort : this->config.storageNodeIPs) 
         {
             auto storageNode = std::make_shared<StorageNode>(ipPort, this->config.numVirtualNodes);
+            this->storageNodes[storageNode->id] = storageNode;
 
             // add all virtual nodes to the hash ring
             for (auto &vn : storageNode->virtualNodes)
                 hashRing.addNode(vn);
             
-            this->storageNodes[storageNode->id] = storageNode;
+            // node must prove beyond reasonable doubt its healthy
+            this->nodeHealthMap[storageNode->id] = false;
         }
     }
 
 public:
-
     /**
      * HashRing used to distribute our blocks evenly across nodes
      */
     HashRing hashRing;
 
     /**
-     * Mapping of the form: KEY -> {block num -> storage node id}.
+     * Stores mapping of the form: key -> {block num -> storage node id}.
      * 
      * i.e. for each KEY, we store a mapping from block number to storage node
      * 
@@ -71,6 +74,7 @@ public:
      * Mapping is of the form: storage node id -> http_client object.
      */
     std::map<int, std::shared_ptr<http_client>> openConnections;
+    std::mutex openConnectionsMutex;
 
     /**
      * Stores 'health status' of nodes, as per last health check.
@@ -78,11 +82,7 @@ public:
      * Mapping is of the form: storage node id -> 'health status' boolean
      */
     std::map<int, bool> nodeHealthMap;
-
-    /**
-     * Thread that periodically performs the node health checks.
-     */
-    std::thread nodeHealthThread;
+    std::mutex nodeHealthMapMutex;
 
     /**
      * Stores configuration of our service (e.g. storage node IPs)
@@ -132,11 +132,75 @@ public:
     }
 
     /**
-     * TODO:
+     * Thread function used to periodically check health of all storage nodes.
+     * 
+     * `period` - time to wait in between checks (milliseconds)
      */
-    void performHealthCheck()
+    void checkNodeHealth()
     {
+        while (1) 
+        {
+            /**
+             * Every `period` milliseconds, send a GET to the /health/ endpoint
+             * of each storage node.
+             * 
+             * Update our nodeHealthMap accordingly.
+             */
 
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds(this->config.healthCheckPeriodMs)
+            );
+
+            std::vector<pplx::task<void>> healthCheckTasks;
+            for (auto p : storageNodes)
+            {
+                int nodeId = p.first;
+                std::shared_ptr<StorageNode> sn = p.second;
+
+                // initialise / retreive client
+                if (this->openConnections.find(nodeId) == this->openConnections.end())
+                    this->openConnections[nodeId] = std::make_shared<http_client>(U(sn->ipPort));
+                http_client& client = *this->openConnections[nodeId];
+
+                // build and send request
+                http_request req = http_request();
+                req.set_method(methods::GET);
+                req.set_request_uri(U("/health/"));
+
+                auto task = client.request(req)
+                .then([this, nodeId](pplx::task<http_response> prevTask){
+                    try
+                    {
+                        // can throw an http_exception if connection isn't established
+                        http_response resp = prevTask.get();
+
+                        bool isHealthy = (resp.status_code() == status_codes::OK);
+
+                        {
+                            std::lock_guard<std::mutex> lock(this->nodeHealthMapMutex);
+                            this->nodeHealthMap[nodeId] = isHealthy;
+                        }
+                    }
+                    catch (const http_exception &e)
+                    {
+                        // std::cout << "Node " << nodeId << ": " << e.what() << std::endl;
+                        {
+                            std::lock_guard<std::mutex> lock(this->nodeHealthMapMutex);
+                            this->nodeHealthMap[nodeId] = false;
+                        }
+                    }
+                });
+
+                healthCheckTasks.push_back(task);
+            }
+
+            // wait on all request tasks - we're on a separate thread so this won't hurt
+            auto task = pplx::when_all(healthCheckTasks.begin(), healthCheckTasks.end());
+            task.wait();
+
+            std::cout << std::endl << "Storage node health: " << std::endl;
+            PrintUtils::printMap(this->nodeHealthMap);
+        }
     }
 
     /**
@@ -598,7 +662,11 @@ public:
                 .open()
                 .then([&addr](){ std::cout << "Master server is listening at: " << addr << std::endl; });
             
-            // TODO: start health check thread
+            // start a thread to periodically check storage node health
+            std::thread nodeHealthThread([this](){
+                this->checkNodeHealth();
+            });
+            nodeHealthThread.detach();
 
             while (1);
         } 
@@ -637,7 +705,6 @@ namespace MasterServerTests {
         for (int i = 0; i < paths.size(); i++)
         {
             auto p = ApiUtils::parsePath(paths[i]);
-            // std::cout << p.first << " " << p.second << std::endl;
             ASSERT_THAT(p == expectedParsedPaths[i]);
         }
     }
@@ -666,12 +733,11 @@ namespace MasterServerTests {
 
 void run()
 {    
-    // std::string configFilePath = "../config.json";
-    // MasterServer masterServer = MasterServer(configFilePath);
-    // masterServer.startServer();
+    std::string configFilePath = "../config.json";
+    MasterServer masterServer = MasterServer(configFilePath);
+    masterServer.startServer();
 
     // MasterServerTests::runAll();
-    HashRingTests::runAll();
 }
 
 int main() 
@@ -681,13 +747,9 @@ int main()
 
 /*
 TODO:
+    - health checking
     - replication
-        - move physicalNode from hash_ring to master, an rename StorageNode
-        - makes it clearer what we're working with, and makes connection more explicit, 
-          and makes health check map init that little bit easier
     - adding / removing nodes 
-    - periodic health checking
-        - assume all nodes healthy for now
     - master restarting
         - i.e. if it goes down, it needs to re-build its view of the world
     - implement DEL (both master AND server)
@@ -697,6 +759,8 @@ TODO:
     - make .then() code non-blocking (related to concurrent r/w)
     - group together and separate out handlers into nice abstraction
     
+    - authenticate requests from master -> server
+        - token or generated API key
     - sort out documentation
     - potentially:
         - return JSON

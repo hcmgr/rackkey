@@ -22,13 +22,18 @@ void StorageNode::createVirtualNodes()
     }
 }
 
-/* Default constructor */
+/* Param constructor */
 StorageNode::StorageNode(std::string ipPort, int numVirtualNodes)
     : id(idGenerator++),
-        ipPort(ipPort),
-        numVirtualNodes(numVirtualNodes)
+      ipPort(ipPort),
+      numVirtualNodes(numVirtualNodes)
 {
     createVirtualNodes();
+}
+
+std::string StorageNode::toString()
+{
+    return "storage node: " + std::to_string(id) + " (" + ipPort + ")";
 }
 
 int StorageNode::idGenerator = 0;

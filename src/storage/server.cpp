@@ -127,6 +127,23 @@ public:
         return;
     }
 
+    /**
+     * Responds to the master server's health check.
+     */
+    void healthCheckHandler(http_request request)
+    {
+        std::cout << "/health/ req received" << std::endl;
+
+        /**
+         * If it can receive the request, it's healthy.
+         * 
+         * NOTE: In future, perhaps also check health of disk
+         *       storage.
+         */
+        request.reply(status_codes::OK);
+        return;
+    }
+
     void startServer() 
     {
         uri_builder uri("http://0.0.0.0:8080");
@@ -161,10 +178,15 @@ public:
             if (request.method() == methods::DEL)
                 this->deleteHandler(request, key);
         }
-
+        else if (endpoint == U("/health"))
+        {
+            if (request.method() == methods::GET)
+                this->healthCheckHandler(request);
+        }
         else 
         {
             std::cout << "Endpoint not implemented: " << endpoint << std::endl;
+            request.reply(status_codes::NotImplemented);
             return;
         }
     }

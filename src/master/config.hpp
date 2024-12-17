@@ -52,6 +52,13 @@ public:
      */
     std::vector<std::string> storageNodeIPs;
 
+    int numStorageNodes;
+
+    /**
+     * Time (in milliseconds) between storage node health checks.
+     */
+    int healthCheckPeriodMs;
+
     /**
      * Number of virtual hash ring nodes created for each physical node
      */

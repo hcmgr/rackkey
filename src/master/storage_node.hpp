@@ -40,4 +40,6 @@ public:
      * Param constructor
      */
     StorageNode(std::string ipPort, int numVirtualNodes);
+
+    std::string toString();
 };

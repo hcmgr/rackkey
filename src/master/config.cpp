@@ -40,6 +40,10 @@ void Config::loadStorageNodeConfig()
     for (const auto& node : nodesArray) {
         this->storageNodeIPs.push_back(node.as_string());
     }
+    this->numStorageNodes = this->storageNodeIPs.size();
+
+    // retreive health check period
+    this->healthCheckPeriodMs = this->jsonConfig.at(U("healthCheckPeriodMs")).as_integer();
 
     // retreive number of virtual nodes
     this->numVirtualNodes = this->jsonConfig.at(U("numVirtualNodes")).as_integer();
