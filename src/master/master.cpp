@@ -7,6 +7,7 @@
 #include <chrono>
 #include <thread>
 
+#include "storage_node.hpp"
 #include "hash_ring.hpp"
 #include "utils.hpp"
 #include "config.hpp"
@@ -22,23 +23,32 @@ class MasterServer
 {
 private:
 
-/**
- * Create and add our pre-defined storage nodes to the hash ring.
- */
-void addInitialStorageNodes() {
-    for (std::string ip : this->config.storageNodeIPs) {
-        hashRing.addNode(ip, this->config.numVirtualNodes);
+    /**
+     * Add our pre-defined storage nodes and add their virtual nodes
+     * to the hash ring.
+     */
+    void addInitialStorageNodes() {
+        for (std::string ipPort : this->config.storageNodeIPs) 
+        {
+            auto storageNode = std::make_shared<StorageNode>(ipPort, this->config.numVirtualNodes);
+
+            // add all virtual nodes to the hash ring
+            for (auto &vn : storageNode->virtualNodes)
+                hashRing.addNode(vn);
+            
+            this->storageNodes[storageNode->id] = storageNode;
+        }
     }
-}
 
 public:
+
     /**
      * HashRing used to distribute our blocks evenly across nodes
      */
     HashRing hashRing;
 
     /**
-     * Mapping of the form: KEY -> {blockNum -> storageNodeId}.
+     * Mapping of the form: KEY -> {block num -> storage node id}.
      * 
      * i.e. for each KEY, we store a mapping from block number to storage node
      * 
@@ -46,21 +56,28 @@ public:
      * 
      * NOTE: nicknamed the 'KBN' for brevity
      */
-    std::map<std::string, std::shared_ptr<std::map<int, int>> > keyBlockNodeMap;
+    std::map<std::string, std::shared_ptr<std::map<int, int>>> keyBlockNodeMap;
+
+    /**
+     * Stores our storage nodes.
+     * 
+     * Mapping is of the form: storage node id -> StorageNode object.
+     */
+    std::map<int, std::shared_ptr<StorageNode>> storageNodes;
 
     /**
      * Stores currently open connections to storage nodes.
      * 
-     * Mapping is of the form: node id -> http_client object.
+     * Mapping is of the form: storage node id -> http_client object.
      */
     std::map<int, std::shared_ptr<http_client>> openConnections;
 
     /**
      * Stores 'health status' of nodes, as per last health check.
      * 
-     * i.e. ith entry true iff ith node survived last health check, false otherwise.
+     * Mapping is of the form: storage node id -> 'health status' boolean
      */
-    std::vector<int, bool> nodeHealthMap;
+    std::map<int, bool> nodeHealthMap;
 
     /**
      * Thread that periodically performs the node health checks.
@@ -123,21 +140,21 @@ public:
     }
 
     /**
-     * Retreives all blocks from given physical node
+     * Retreives all blocks from given storage node
      */
     pplx::task<void> getBlocks(
-        int physicalNodeId,
+        int storageNodeId,
         std::string key,
         std::vector<int> blockNums,
         std::shared_ptr<std::map<int, Block>> blockMap
     )
     {
-        std::shared_ptr<PhysicalNode> pn = this->hashRing.getPhysicalNode(physicalNodeId);
+        std::shared_ptr<StorageNode> sn = this->storageNodes[storageNodeId];
 
         // initialise / retreive client
-        if (this->openConnections.find(pn->id) == this->openConnections.end())
-            this->openConnections[pn->id] = std::make_shared<http_client>(U(pn->ipPort));
-        http_client& client = *this->openConnections[pn->id];
+        if (this->openConnections.find(sn->id) == this->openConnections.end())
+            this->openConnections[sn->id] = std::make_shared<http_client>(U(sn->ipPort));
+        http_client& client = *this->openConnections[sn->id];
 
         // build request
         http_request req = http_request();
@@ -267,18 +284,18 @@ public:
      * physical node.
      */
     pplx::task<void> sendBlocks(
-        int physicalNodeId,
+        int storageNodeId,
         std::string key,
         std::vector<Block> &blocks,
         std::shared_ptr<std::map<int, int>> blockNodeMap
     )
     {
-        std::shared_ptr<PhysicalNode> pn = this->hashRing.getPhysicalNode(physicalNodeId);
+        std::shared_ptr<StorageNode> sn = this->storageNodes[storageNodeId];
 
         // initialise / retreive client
-        if (this->openConnections.find(pn->id) == this->openConnections.end())
-            this->openConnections[pn->id] = std::make_shared<http_client>(U(pn->ipPort));
-        http_client& client = *this->openConnections[pn->id];
+        if (this->openConnections.find(sn->id) == this->openConnections.end())
+            this->openConnections[sn->id] = std::make_shared<http_client>(U(sn->ipPort));
+        http_client& client = *this->openConnections[sn->id];
         
         // populate body
         std::vector<unsigned char> payloadBuffer;
@@ -309,7 +326,7 @@ public:
             {
                 for (auto block : blocks)
                 {
-                    blockNodeMap->insert({block.blockNum, physicalNodeId});
+                    blockNodeMap->insert({block.blockNum, storageNodeId});
                 }
             });
 
@@ -421,14 +438,14 @@ public:
     /**
      * Deletes all blocks correpsonding to key `key` from node with id `physicalNodeId`.
      */
-    pplx::task<void> deleteBlocks(int physicalNodeId, std::string key)
+    pplx::task<void> deleteBlocks(int storageNodeId, std::string key)
     {
-        std::shared_ptr<PhysicalNode> pn = this->hashRing.getPhysicalNode(physicalNodeId);
+        std::shared_ptr<StorageNode> sn = this->storageNodes[storageNodeId];
 
         // initialise / retreive client
-        if (this->openConnections.find(pn->id) == this->openConnections.end())
-            this->openConnections[pn->id] = std::make_shared<http_client>(U(pn->ipPort));
-        http_client& client = *this->openConnections[pn->id];
+        if (this->openConnections.find(sn->id) == this->openConnections.end())
+            this->openConnections[sn->id] = std::make_shared<http_client>(U(sn->ipPort));
+        http_client& client = *this->openConnections[sn->id];
 
         // build and send request
         http_request req = http_request();
@@ -653,7 +670,8 @@ void run()
     // MasterServer masterServer = MasterServer(configFilePath);
     // masterServer.startServer();
 
-    MasterServerTests::runAll();
+    // MasterServerTests::runAll();
+    HashRingTests::runAll();
 }
 
 int main() 

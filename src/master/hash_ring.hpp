@@ -34,47 +34,6 @@ public:
 };
 
 /**
- * Represents a physical storage node
- */
-class PhysicalNode {
-private:
-    /**
-     * Generates unique PhysicalNode ids by incrementing on 
-     * each constructor call
-     */
-    static int idGenerator;
-
-    /**
-     * Create all virtual nodes.
-     * 
-     * Note that virtual nodes are only added to the HashRing
-     * when the physical node is added.
-     */
-    void createVirtualNodes();
-
-public:
-    /**
-     * Unique id given to physical node
-     */
-    int id;
-
-    /**
-     * ip:port combination of physical node
-     */
-    std::string ipPort;
-
-    int numVirtualNodes;
-    
-    /**
-     * Physical node's virtual nodes
-     */
-    std::vector<std::shared_ptr<VirtualNode>> virtualNodes;
-
-    /* Default constructor */
-    PhysicalNode(std::string ipPort, int numVirtualNodes);
-};
-
-/**
  * Represents a hash ring used for consistent hashing
  */
 class HashRing 
@@ -91,45 +50,31 @@ private:
     std::map<uint32_t, std::shared_ptr<VirtualNode> > ring;
 
     /**
-     * Stores our physical storage nodes.
-     * 
-     * Maps unique storage node id -> PhysicalNode.
-     * 
-     * Allows fast lookup of a virtual node's corresponding physical node.
+     * Range of the hash ring is: [0, HASH_MODULO)
      */
-    std::map<int, std::shared_ptr<PhysicalNode> > physicalNodes;
-
-    const uint32_t HASH_MODULO;
+    const uint32_t HASH_MODULO = UINT32_MAX;
 
 public:
     /* Default constructor */
     HashRing();
 
     /**
-     * Creates a physical node for the given ip and adds it to the ring.
-     * 
-     * In effect, this means adding all the physical node's
-     * virtual nodes to the ring.
-     * 
-     * NOTE: this triggers a re-assignment.
+     * Adds the given VirtualNode to the ring.
      */
-    void addNode(std::string ip, int numVirtualNodes);
+    void addNode(std::shared_ptr<VirtualNode> virtualNode);
 
     /**
-     * Removes the given physical node from the ring.
-     * 
-     * In effect, this means removing all the physical node's
-     * virtual nodes from the ring.
-     * 
-     * NOTE: this triggers a re-assignment.
+     * Removes the given VirtualNode from the ring.
      */
-    void removeNode(int physicalNodeId);
+    void removeNode(std::shared_ptr<VirtualNode> virtualNode);
+
+    /**
+     * Return the number of VirtualNode's on the ring.
+     */
+    int getNodeCount();
 
     /* Finds and returns next (virtual) node along the ring */
     std::shared_ptr<VirtualNode> findNextNode(uint32_t hash);
-
-    /* Return physical node of the given id */
-    std::shared_ptr<PhysicalNode> getPhysicalNode(int id);
 
     /* Pretty prints all virtual nodes of the HashRing, in order */
     void prettyPrintHashRing();
@@ -137,11 +82,7 @@ public:
 
 namespace HashRingTests 
 {
-    /**
-     * Returns list of N sequential ip addresses starting from baseIP
-     */
-    std::vector<std::string> setupRandomIPs(std::string baseIP, int N);
-
     void testHashRingFindNextNode();
     void testHashRingEvenlyDistributed();
+    void runAll();
 };
