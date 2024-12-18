@@ -45,7 +45,7 @@ namespace PrintUtils {
     {
         std::cout << "[ ";
         for (size_t i = 0; i < vec.size(); ++i) {
-            std::cout << static_cast<uint8_t>(vec[i]);
+            std::cout << vec[i];
             if (i != vec.size() - 1) {
                 std::cout << ", ";
             }

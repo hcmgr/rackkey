@@ -46,9 +46,33 @@ public:
         std::vector<Block> blocks;
         uint32_t dataBlockSize = 4096;
 
+        /**
+         * Get block numbers from request payload
+         */
+        std::vector<uint32_t> blockNums;
+
+        auto task = request.extract_vector()
+        .then([&](std::vector<unsigned char> payload)
+        {
+            auto it = payload.begin();
+            while (it != payload.end())
+            {
+                uint32_t blockNum;
+                std::memcpy(&blockNum, &(*it), sizeof(blockNum));
+                it += sizeof(blockNum);
+
+                blockNums.push_back(blockNum);
+            }
+        });
+
+        task.wait();
+
+        /**
+         * Retreive requested blocks from disk
+         */
         try 
         {
-            blocks = diskStorage.readBlocks(key, dataBlockSize, readBuffer);
+            blocks = diskStorage.readBlocks(key, blockNums, dataBlockSize, readBuffer);
         }
         catch (std::runtime_error &e)
         {
@@ -77,16 +101,16 @@ public:
     {
         std::cout << "PUT req received: " << key << std::endl;
 
-        auto payloadPtr = std::make_shared<std::vector<unsigned char>>();
+        auto payloadBuffer = std::make_shared<std::vector<unsigned char>>();
 
         pplx::task<void> task = request.extract_vector()
 
         // extract list of blocks
         .then([&](std::vector<unsigned char> payload)
         {
-            *payloadPtr = std::move(payload);
+            *payloadBuffer = std::move(payload);
 
-            std::vector<Block> blocks = Block::deserialize(*payloadPtr);
+            std::vector<Block> blocks = Block::deserialize(*payloadBuffer);
             
             try
             {
@@ -132,8 +156,6 @@ public:
      */
     void healthCheckHandler(http_request request)
     {
-        std::cout << "/health/ req received" << std::endl;
-
         /**
          * If it can receive the request, it's healthy.
          * 
@@ -197,7 +219,7 @@ void run()
     StorageServer storageServer = StorageServer();
     storageServer.startServer();
 
-    // DiskStorageTests::runAll();
+    DiskStorageTests::runAll();
 }
 
 int main()

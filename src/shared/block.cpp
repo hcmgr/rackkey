@@ -66,7 +66,8 @@ std::vector<Block> Block::deserialize(std::vector<unsigned char>& inputBuffer)
     std::vector<Block> blocks;
     auto it = inputBuffer.begin();
 
-    while (it != inputBuffer.end()) {
+    while (it != inputBuffer.end()) 
+    {
         // Deserialize `keySize`
         uint32_t keySize;
         std::memcpy(&keySize, &(*it), sizeof(keySize));
@@ -179,9 +180,11 @@ namespace BlockUtils
      * Generate `N` blocks with total data size `numBytes`, each with
      * key `key`.
      * 
+     * Returns pair of the form {block list, block numbers}
+     * 
      * NOTE: used to write tests for Block and other modules.
      */
-    std::vector<Block> generateRandom(
+    std::pair<std::vector<Block>, std::vector<uint32_t>> generateRandom(
         std::string key, 
         uint32_t blockSize,
         uint32_t numBytes,
@@ -189,6 +192,7 @@ namespace BlockUtils
     )
     {
         std::vector<Block> blocks;
+        std::vector<uint32_t> blockNums;
 
         // create random data for blocks - upper case letters
         std::random_device rd;
@@ -208,14 +212,16 @@ namespace BlockUtils
             // Create a block with the random data
             blocks.emplace_back(
                 key,
-                blockNum++,
+                blockNum,
                 dataBuffers.back().size(),
                 dataBuffers.back().begin(),
                 dataBuffers.back().end()
             );
+
+            blockNums.push_back(blockNum++);
         }
 
-        return blocks;
+        return {blocks, blockNums};
     }
 }
 
@@ -233,7 +239,9 @@ namespace BlockTests
         uint32_t numBytes = N * blockSize + 40;
         std::vector<std::vector<unsigned char>> dataBuffers;
 
-        std::vector<Block> blocks = BlockUtils::generateRandom("archive.zip", blockSize, numBytes, dataBuffers);
+        auto p = BlockUtils::generateRandom("archive.zip", blockSize, numBytes, dataBuffers);
+        std::vector<Block> blocks = p.first;
+        std::vector<uint32_t> blockNums = p.second;
 
         // Pretty print the blocks before serialization
         std::cout << "Before Serialization:" << std::endl << std::endl;

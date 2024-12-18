@@ -65,12 +65,14 @@ public:
 namespace BlockUtils
 {
     /**
-     * Generate blocks of size `blockSize` that cumulatively give
-     * `totalDataSize` bytes, each with the key `key`.
+     * Generate `N` blocks with total data size `numBytes`, each with
+     * key `key`.
+     * 
+     * Returns pair of the form {block list, block numbers}
      * 
      * NOTE: used to write tests for Block and other modules.
      */
-    std::vector<Block> generateRandom(
+    std::pair<std::vector<Block>, std::vector<uint32_t>> generateRandom(
         std::string key, 
         uint32_t blockSize,
         uint32_t numBytes,

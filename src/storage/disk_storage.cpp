@@ -218,13 +218,15 @@ DiskStorage::~DiskStorage()
  * NOTE:
  *
  * `readBuffer` is the buffer we read the raw block data into 
- * and it may be emptied, as it is resized as needed.
- * 
- * 
- * We pass this in so that the data the block pointers reference
- * does not get de-allocated.
+ * and it may be emptied, as it is resized as needed.  We pass 
+ * this in so that the data the block pointers reference does 
+ * not get de-allocated.
  */
-std::vector<Block> DiskStorage::readBlocks(std::string key, uint32_t dataBlockSize, std::vector<unsigned char> &readBuffer)
+std::vector<Block> DiskStorage::readBlocks(
+    std::string key, 
+    std::vector<uint32_t> blockNums,
+    uint32_t dataBlockSize, 
+    std::vector<unsigned char> &readBuffer)
 {
     // find BAT entry of `key`
     auto entry = this->bat.findBATEntry(Crypto::sha256_32(key));
@@ -715,7 +717,9 @@ namespace DiskStorageTests
         uint32_t N = 2;
         uint32_t numDataBytes = N * dataBlockSize;
         std::vector<std::vector<unsigned char>> writeDataBuffers;
-        std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = p.first;
+
         ds.writeBlocks(key, writeBlocks);
 
         // write N more data blocks, for a different key
@@ -756,7 +760,10 @@ namespace DiskStorageTests
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
         // write all blocks
-        std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = p.first;
+        std::vector<uint32_t> blockNums = p.second;
+
         std::cout << writeBlocks.size() << std::endl;
         ds.writeBlocks(key, writeBlocks);
 
@@ -765,7 +772,7 @@ namespace DiskStorageTests
 
         // read blocks
         std::vector<unsigned char> readBuffer;
-        std::vector<Block> readBlocks = newDs.readBlocks(key, dataBlockSize, readBuffer);
+        std::vector<Block> readBlocks = newDs.readBlocks(key, blockNums, dataBlockSize, readBuffer);
 
         // ensure what we wrote is what we read
         if (writeBlocks.size() != readBlocks.size())
@@ -795,6 +802,7 @@ namespace DiskStorageTests
 
         std::vector<std::string> keys;
         std::vector<std::vector<Block>> writeBlocksList;
+        std::vector<std::vector<uint32_t>> writeBlockNumsList;
         std::vector<std::vector<std::vector<unsigned char>>> writeDataBuffersList;
 
         uint32_t M = 1; // num. different keys we write
@@ -810,11 +818,15 @@ namespace DiskStorageTests
             std::vector<std::vector<unsigned char>> writeDataBuffers;
 
             // Generate and write blocks
-            std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+            // std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+            auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+            std::vector<Block> writeBlocks = p.first;
+            std::vector<uint32_t> writeBlockNums = p.second;
             ds.writeBlocks(key, writeBlocks);
 
             // Store for later validation
             writeBlocksList.push_back(writeBlocks);
+            writeBlockNumsList.push_back(writeBlockNums);
             writeDataBuffersList.push_back(std::move(writeDataBuffers));
         }
 
@@ -830,6 +842,7 @@ namespace DiskStorageTests
 
             std::string& key = keys[i];
             std::vector<Block>& expectedBlocks = writeBlocksList[i];
+            std::vector<uint32_t>& blockNums = writeBlockNumsList[i];
             std::vector<unsigned char> totalWriteBuffer = VectorUtils::flatten(writeDataBuffersList[i]);
 
             std::cout << "Expected blocks: " << std::endl << std::endl;
@@ -838,7 +851,7 @@ namespace DiskStorageTests
 
             // Read blocks
             std::vector<unsigned char> readBuffer;
-            std::vector<Block> readBlocks = newDs.readBlocks(key, dataBlockSize, readBuffer);
+            std::vector<Block> readBlocks = newDs.readBlocks(key, blockNums, dataBlockSize, readBuffer);
 
             std::cout << "Read blocks: " << std::endl << std::endl;
             for (auto block : readBlocks)
@@ -873,7 +886,8 @@ namespace DiskStorageTests
         std::cout << numDiskBlocks << std::endl;
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
-        std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = p.first;
         ds.writeBlocks(key, writeBlocks);
 
         // should have written `numDiskBlocks` blocks, starting at blockNum = 0
@@ -909,7 +923,8 @@ namespace DiskStorageTests
         uint32_t numDiskBlocks = ds.getNumDiskBlocks(numTotalBytes);
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
-        std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = p.first;
         ds.writeBlocks(key, writeBlocks);
 
         // write some more blocks, for another key
@@ -919,7 +934,8 @@ namespace DiskStorageTests
         uint32_t newNumTotalBytes = newNumBytes + (newN * sizeof(uint32_t));
         uint32_t newNumDiskBlocks = ds.getNumDiskBlocks(newNumTotalBytes);
         writeDataBuffers.clear();
-        writeBlocks = BlockUtils::generateRandom(newKey, dataBlockSize, newNumBytes, writeDataBuffers);
+        p = BlockUtils::generateRandom(newKey, dataBlockSize, newNumBytes, writeDataBuffers);
+        writeBlocks = p.first;
         ds.writeBlocks(newKey, writeBlocks);
 
         // create a new DiskStorage object - to force an initialisation from file
@@ -952,7 +968,8 @@ namespace DiskStorageTests
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
         // write N blocks
-        std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = p.first;
         ds.writeBlocks(key, writeBlocks);
 
         auto entry = ds.bat.findBATEntry(Crypto::sha256_32(key));
@@ -968,7 +985,8 @@ namespace DiskStorageTests
         numTotalBytes = numDataBytes + (M * sizeof(uint32_t));
         uint32_t numDiskBlocksM = ds.getNumDiskBlocks(numTotalBytes);
         writeDataBuffers.clear();
-        writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        writeBlocks = p.first;
         ds.writeBlocks(key, writeBlocks);
 
         entry = ds.bat.findBATEntry(Crypto::sha256_32(key));
@@ -1008,7 +1026,8 @@ namespace DiskStorageTests
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
         // write N blocks for first key
-        std::vector<Block> writeBlocks = BlockUtils::generateRandom(key1, dataBlockSize, numDataBytes, writeDataBuffers);
+        auto p = BlockUtils::generateRandom(key1, dataBlockSize, numDataBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = p.first;
         ds.writeBlocks(key1, writeBlocks);
 
         // write M blocks for second key (doesn't really matter how many)
@@ -1018,7 +1037,8 @@ namespace DiskStorageTests
         numTotalBytes = numDataBytes + (N * sizeof(uint32_t));
         uint32_t numDiskBlocksKey2 = ds.getNumDiskBlocks(numTotalBytes);
         writeDataBuffers.clear();
-        writeBlocks = BlockUtils::generateRandom(key2, dataBlockSize, numDataBytes, writeDataBuffers);
+        p = BlockUtils::generateRandom(key2, dataBlockSize, numDataBytes, writeDataBuffers);
+        writeBlocks = p.first;
         ds.writeBlocks(key2, writeBlocks);
 
         // delete first key (i.e. free first N blocks)
@@ -1031,7 +1051,8 @@ namespace DiskStorageTests
         numTotalBytes = numDataBytes + ((N+1) * sizeof(uint32_t));
         uint32_t numDiskBlocksKey3 = ds.getNumDiskBlocks(numTotalBytes);
         writeDataBuffers.clear();
-        writeBlocks = BlockUtils::generateRandom(key3, dataBlockSize, numDataBytes, writeDataBuffers);
+        p = BlockUtils::generateRandom(key3, dataBlockSize, numDataBytes, writeDataBuffers);
+        writeBlocks = p.first;
         ds.writeBlocks(key3, writeBlocks);
 
         // ensure `key1`s blocks are unmapped
@@ -1070,7 +1091,8 @@ namespace DiskStorageTests
         uint32_t numTotalBytes = numDataBytes + (N * sizeof(uint32_t));
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
-        std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = p.first;
         ds.writeBlocks(key, writeBlocks);
 
         auto entry = ds.bat.findBATEntry(Crypto::sha256_32(key));
@@ -1089,7 +1111,8 @@ namespace DiskStorageTests
         uint32_t newNumTotalBytes = newNumDataBytes + (newN * sizeof(uint32_t));
         writeDataBuffers.clear();
 
-        writeBlocks = BlockUtils::generateRandom(newKey, ds.header.diskBlockSize, newNumDataBytes, writeDataBuffers);
+        p = BlockUtils::generateRandom(newKey, ds.header.diskBlockSize, newNumDataBytes, writeDataBuffers);
+        writeBlocks = p.first;
         try 
         {
             ds.writeBlocks(newKey, writeBlocks);
@@ -1142,7 +1165,8 @@ namespace DiskStorageTests
         uint32_t numDiskBlocks = ds.getNumDiskBlocks(numDataBytes);
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
-        std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = p.first;
         ds.writeBlocks(key, writeBlocks);
 
         // ensure first write was valid
@@ -1157,7 +1181,8 @@ namespace DiskStorageTests
         uint32_t newN = 1;
         uint32_t newNumBytes = N * dataBlockSize;
         writeDataBuffers.clear();
-        writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, newNumBytes, writeDataBuffers);
+        p = BlockUtils::generateRandom(key, dataBlockSize, newNumBytes, writeDataBuffers);
+        writeBlocks = p.first;
 
         /**
          * Setting dataSize to 0 when underlying data is non-zero size

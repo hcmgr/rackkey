@@ -59,21 +59,21 @@ public:
      * 
      * NOTE: nicknamed the 'KBN' for brevity
      */
-    std::map<std::string, std::shared_ptr<std::map<int, int>>> keyBlockNodeMap;
+    std::map<std::string, std::shared_ptr<std::map<uint32_t, uint32_t>>> keyBlockNodeMap;
 
     /**
      * Stores our storage nodes.
      * 
      * Mapping is of the form: storage node id -> StorageNode object.
      */
-    std::map<int, std::shared_ptr<StorageNode>> storageNodes;
+    std::map<uint32_t, std::shared_ptr<StorageNode>> storageNodes;
 
     /**
      * Stores currently open connections to storage nodes.
      * 
      * Mapping is of the form: storage node id -> http_client object.
      */
-    std::map<int, std::shared_ptr<http_client>> openConnections;
+    std::map<uint32_t, std::shared_ptr<http_client>> openConnections;
     std::mutex openConnectionsMutex;
 
     /**
@@ -81,7 +81,7 @@ public:
      * 
      * Mapping is of the form: storage node id -> 'health status' boolean
      */
-    std::map<int, bool> nodeHealthMap;
+    std::map<uint32_t, bool> nodeHealthMap;
     std::mutex nodeHealthMapMutex;
 
     /**
@@ -113,12 +113,12 @@ public:
      */
     void calculateAndShowBlockDistribution(std::string key) 
     {
-        std::map<int, int> nodeBlockCounts; // node id -> block count
-        int totalNumBlocks = this->keyBlockNodeMap[key]->size();
+        std::map<uint32_t, uint32_t> nodeBlockCounts; // node id -> block count
+        uint32_t totalNumBlocks = this->keyBlockNodeMap[key]->size();
         
         for (auto p : *(this->keyBlockNodeMap[key]))
         {
-            int nodeId = p.second;
+            uint32_t nodeId = p.second;
 
             if (nodeBlockCounts.find(nodeId) == nodeBlockCounts.end())
                 nodeBlockCounts[nodeId] = 0;
@@ -154,20 +154,17 @@ public:
             std::vector<pplx::task<void>> healthCheckTasks;
             for (auto p : storageNodes)
             {
-                int nodeId = p.first;
+                uint32_t nodeId = p.first;
                 std::shared_ptr<StorageNode> sn = p.second;
 
-                // initialise / retreive client
-                if (this->openConnections.find(nodeId) == this->openConnections.end())
-                    this->openConnections[nodeId] = std::make_shared<http_client>(U(sn->ipPort));
-                http_client& client = *this->openConnections[nodeId];
+                auto client = getHttpClient(sn);
 
                 // build and send request
                 http_request req = http_request();
                 req.set_method(methods::GET);
                 req.set_request_uri(U("/health/"));
 
-                auto task = client.request(req)
+                auto task = client->request(req)
                 .then([this, nodeId](pplx::task<http_response> prevTask){
                     try
                     {
@@ -198,36 +195,62 @@ public:
             auto task = pplx::when_all(healthCheckTasks.begin(), healthCheckTasks.end());
             task.wait();
 
-            std::cout << std::endl << "Storage node health: " << std::endl;
-            PrintUtils::printMap(this->nodeHealthMap);
+            bool reporting = false; // TODO : make an #ifdef thing
+            if (reporting)
+            {
+                std::cout << std::endl << "Storage node health: " << std::endl;
+                PrintUtils::printMap(this->nodeHealthMap);
+            }
         }
+    }
+
+    /**
+     * Retreive the http_client associated with the given storage
+     * node, or create one if it doesn't exist.
+     */
+    std::shared_ptr<http_client> getHttpClient(std::shared_ptr<StorageNode> sn)
+    {
+        if (this->openConnections.find(sn->id) == this->openConnections.end())
+            this->openConnections[sn->id] = std::make_shared<http_client>(U(sn->ipPort));
+        return this->openConnections[sn->id];
     }
 
     /**
      * Retreives all blocks from given storage node
      */
     pplx::task<void> getBlocks(
-        int storageNodeId,
+        uint32_t storageNodeId,
         std::string key,
-        std::vector<int> blockNums,
-        std::shared_ptr<std::map<int, Block>> blockMap
+        std::vector<uint32_t> blockNums,
+        std::shared_ptr<std::map<uint32_t, Block>> blockMap
     )
     {
         std::shared_ptr<StorageNode> sn = this->storageNodes[storageNodeId];
 
-        // initialise / retreive client
-        if (this->openConnections.find(sn->id) == this->openConnections.end())
-            this->openConnections[sn->id] = std::make_shared<http_client>(U(sn->ipPort));
-        http_client& client = *this->openConnections[sn->id];
+        auto client = getHttpClient(sn);
 
-        // build request
+        /**
+         * Serialise block numbers to send as payload.
+         */
+        std::vector<unsigned char> requestPayload;
+        for (uint32_t bn : blockNums)
+        {
+            requestPayload.insert(
+                requestPayload.end(),
+                reinterpret_cast<unsigned char*>(&bn),
+                reinterpret_cast<unsigned char*>(&bn) + sizeof(bn)
+            );
+        }
+
+        // build request and send request
         http_request req = http_request();
         req.set_method(methods::GET);
         req.set_request_uri(U("/store/" + key));
+        req.set_body(requestPayload);
 
-        auto payloadPtr = std::make_shared<std::vector<unsigned char>>();
+        auto responsePayload = std::make_shared<std::vector<unsigned char>>();
 
-        return client.request(req)
+        return client->request(req)
         .then([=](http_response response)
         {
             if (response.status_code() != status_codes::OK)
@@ -237,10 +260,12 @@ public:
             }
             return response.extract_vector();
         })
+
+        // deserialise payload and populate block map
         .then([=](std::vector<unsigned char> payload)
         {
-            *payloadPtr = payload;
-            std::vector<Block> blocks = Block::deserialize(*(payloadPtr));
+            *responsePayload = payload;
+            std::vector<Block> blocks = Block::deserialize(*(responsePayload));
             for (auto block : blocks)
             {
                 blockMap->insert({block.blockNum, std::move(block)});
@@ -257,7 +282,7 @@ public:
      * NOTE: TODO:
      * 
      * At the moment, we don't send block numbers to get.
-     * Will likely needs this in the future.
+     * Will likely needs this in the future
      */
     void getHandler(http_request request, const std::string key) 
     {
@@ -271,22 +296,22 @@ public:
             return;
         }
 
-        std::shared_ptr<std::map<int, int>> blockNodeMap = this->keyBlockNodeMap[key];
+        std::shared_ptr<std::map<uint32_t, uint32_t>> blockNodeMap = this->keyBlockNodeMap[key];
         
         /**
          * Build up a mapping of the form: {node id -> block numbers}
          */
-        std::map<int, std::vector<int>> nodeBlockMap;
+        std::map<uint32_t, std::vector<uint32_t>> nodeBlockMap;
         for (auto p : *(blockNodeMap))        
         {
-            int blockNum = p.first;
-            int nodeId = p.second;
+            uint32_t blockNum = p.first;
+            uint32_t nodeId = p.second;
+
             nodeBlockMap[nodeId].push_back(blockNum);
         }
 
         // mapping of the form: {block num. -> block object}
-        // NOTE: each call to `getBlocks` builds this up
-        auto blockMap = std::make_shared<std::map<int, Block>>();
+        auto blockMap = std::make_shared<std::map<uint32_t, Block>>();
         
         /**
          * Call `getBlocks` for each node and wait on all tasks 
@@ -295,8 +320,8 @@ public:
         std::vector<pplx::task<void>> getBlockTasks;
         for (auto p : nodeBlockMap)
         {
-            int nodeId = p.first;
-            std::vector<int> blockNums = p.second;
+            uint32_t nodeId = p.first;
+            std::vector<uint32_t> blockNums = p.second;
 
             auto task = getBlocks(nodeId, key, blockNums, blockMap);
             getBlockTasks.push_back(task);
@@ -348,18 +373,15 @@ public:
      * physical node.
      */
     pplx::task<void> sendBlocks(
-        int storageNodeId,
+        uint32_t storageNodeId,
         std::string key,
         std::vector<Block> &blocks,
-        std::shared_ptr<std::map<int, int>> blockNodeMap
+        std::shared_ptr<std::map<uint32_t, uint32_t>> blockNodeMap
     )
     {
         std::shared_ptr<StorageNode> sn = this->storageNodes[storageNodeId];
 
-        // initialise / retreive client
-        if (this->openConnections.find(sn->id) == this->openConnections.end())
-            this->openConnections[sn->id] = std::make_shared<http_client>(U(sn->ipPort));
-        http_client& client = *this->openConnections[sn->id];
+        auto client = getHttpClient(sn);
         
         // populate body
         std::vector<unsigned char> payloadBuffer;
@@ -374,7 +396,7 @@ public:
         req.set_request_uri(U("/store/" + key));
         req.set_body(payloadBuffer);
 
-        pplx::task<void> task = client.request(req)
+        pplx::task<void> task = client->request(req)
             // send request
             .then([=](http_response response) 
             {
@@ -410,7 +432,7 @@ public:
         // Timing point: start
         auto start = std::chrono::high_resolution_clock::now();
             
-        auto blockNodeMap = std::make_shared<std::map<int, int>>();
+        auto blockNodeMap = std::make_shared<std::map<uint32_t, uint32_t>>();
         auto payloadPtr = std::make_shared<std::vector<unsigned char>>();
 
         std::vector<pplx::task<void>> sendBlockTasks;
@@ -423,21 +445,21 @@ public:
         {
             *payloadPtr = std::move(payload);
                   
-            int payloadSize = payloadPtr->size();
-            int blockCnt = 0;
+            uint32_t payloadSize = payloadPtr->size();
+            uint32_t blockCnt = 0;
 
-            std::map<int, std::vector<Block>> nodeBlockMap;
+            std::map<uint32_t, std::vector<Block>> nodeBlockMap;
 
-            for (int i = 0; i < payloadSize; i += config.blockSize) 
+            for (uint32_t i = 0; i < payloadSize; i += config.diskBlockSize) 
             {
-                int blockNum = blockCnt++;
+                uint32_t blockNum = blockCnt++;
 
                 std::string hashInput = key + std::to_string(blockNum);
                 uint32_t hash = Crypto::sha256_32(hashInput);
                 std::shared_ptr<VirtualNode> vn = this->hashRing.findNextNode(hash);
                 
                 auto blockStart = payloadPtr->begin() + i;
-                auto blockEnd = payloadPtr->begin() + std::min(i + config.blockSize, payloadSize);
+                auto blockEnd = payloadPtr->begin() + std::min(i + config.diskBlockSize, payloadSize);
                 auto blockSize = blockEnd - blockStart;
 
                 Block block(key, blockNum, blockSize, blockStart, blockEnd);
@@ -448,13 +470,13 @@ public:
         })
 
         // send all blocks for given node at once
-        .then([&](std::map<int, std::vector<Block>> nodeBlockMap)
+        .then([&](std::map<uint32_t, std::vector<Block>> nodeBlockMap)
         {
             auto sendStart = std::chrono::high_resolution_clock::now();
 
             for (auto p : nodeBlockMap)
             {
-                int physicalNodeId = p.first;
+                uint32_t physicalNodeId = p.first;
                 std::vector<Block> blocks = p.second;
 
                 auto task = sendBlocks(physicalNodeId, key, blocks, blockNodeMap);
@@ -502,21 +524,18 @@ public:
     /**
      * Deletes all blocks correpsonding to key `key` from node with id `physicalNodeId`.
      */
-    pplx::task<void> deleteBlocks(int storageNodeId, std::string key)
+    pplx::task<void> deleteBlocks(uint32_t storageNodeId, std::string key)
     {
         std::shared_ptr<StorageNode> sn = this->storageNodes[storageNodeId];
 
-        // initialise / retreive client
-        if (this->openConnections.find(sn->id) == this->openConnections.end())
-            this->openConnections[sn->id] = std::make_shared<http_client>(U(sn->ipPort));
-        http_client& client = *this->openConnections[sn->id];
+        auto client = getHttpClient(sn);
 
         // build and send request
         http_request req = http_request();
         req.set_method(methods::DEL);
         req.set_request_uri(U("/store/" + key));
 
-        auto task = client.request(req)
+        auto task = client->request(req)
         .then([=](http_response response)
         {
             if (response.status_code() != status_codes::OK)
@@ -553,19 +572,19 @@ public:
         }
 
         // Find all nodes that store at least 1 block for `key`
-        std::set<int> nodeIds;
-        std::shared_ptr<std::map<int, int>> blockNodeMap = this->keyBlockNodeMap[key];
+        std::set<uint32_t> nodeIds;
+        std::shared_ptr<std::map<uint32_t, uint32_t>> blockNodeMap = this->keyBlockNodeMap[key];
 
         for (auto p : *(blockNodeMap))
         {
-            int nodeId = p.second;
+            uint32_t nodeId = p.second;
             nodeIds.insert(nodeId);
         }
 
         std::vector<pplx::task<void>> delBlockTasks;
 
         // call `deleteBlocks` for each node
-        for (int nodeId : nodeIds)
+        for (uint32_t nodeId : nodeIds)
         {
             auto task = deleteBlocks(nodeId, key);
             delBlockTasks.push_back(task);
@@ -631,13 +650,11 @@ public:
             if (request.method() == methods::DEL)
                 this->deleteHandler(request, param);
         }
-
         else if (endpoint == U("/keys") && param == U(""))
         {
             if (request.method() == methods::GET)
                 this->getKeysHandler(request);
         }
-
         else 
         {
             std::cout << "Endpoint not implemented: " << endpoint << std::endl;
@@ -663,9 +680,7 @@ public:
                 .then([&addr](){ std::cout << "Master server is listening at: " << addr << std::endl; });
             
             // start a thread to periodically check storage node health
-            std::thread nodeHealthThread([this](){
-                this->checkNodeHealth();
-            });
+            std::thread nodeHealthThread(&MasterServer::checkNodeHealth, this);
             nodeHealthThread.detach();
 
             while (1);
@@ -748,6 +763,10 @@ int main()
 /*
 TODO:
     - replication
+        - first, need to send block numbers on GET (and maybe DELETE)
+            - each storage node will store more than any GET requires of it,
+              return only those required of it
+    - way to run all tests with one command
     - adding / removing nodes 
     - master restarting
         - i.e. if it goes down, it needs to re-build its view of the world

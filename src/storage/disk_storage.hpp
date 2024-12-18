@@ -124,7 +124,11 @@ public:
      * We pass this in so that the data the block pointers reference
      * does not get de-allocated.
      */
-    std::vector<Block> readBlocks(std::string key, uint32_t dataBlockSize, std::vector<unsigned char> &readBuffer);
+    std::vector<Block> readBlocks(
+        std::string key, 
+        std::vector<uint32_t> blockNums,
+        uint32_t dataBlockSize, 
+        std::vector<unsigned char> &readBuffer);
 
     /**
      * Write the given list of blocks `dataBlocks` for the given `key`.

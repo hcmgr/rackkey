@@ -52,22 +52,22 @@ public:
      */
     std::vector<std::string> storageNodeIPs;
 
-    int numStorageNodes;
+    uint32_t numStorageNodes;
 
     /**
      * Time (in milliseconds) between storage node health checks.
      */
-    int healthCheckPeriodMs;
+    uint32_t healthCheckPeriodMs;
 
     /**
      * Number of virtual hash ring nodes created for each physical node
      */
-    int numVirtualNodes;
+    uint32_t numVirtualNodes;
 
     /**
      * Storage node block size (in bytes)
      */
-    int blockSize;
+    uint32_t diskBlockSize;
 
     /* Default constructor */
     Config(std::string configFilePath);
