@@ -3,11 +3,12 @@
     "storageNodeIPs": [
         "http://127.0.0.1:8081",
         "http://127.0.0.1:8082",
-        "http://127.0.0.1:8083"
+        "http://127.0.0.1:8083",
+        "http://127.0.0.1:8084"
 
     ],
     "healthCheckPeriodMs": 1000,
     "numVirtualNodes": 50,
     "diskBlockSize": 4096,
-    "replicationFactor": 3
+    "replicationFactor": 2
 }

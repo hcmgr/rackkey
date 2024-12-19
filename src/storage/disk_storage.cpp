@@ -273,9 +273,7 @@ std::vector<Block> DiskStorage::readBlocks(
         std::memcpy(&blockNum, &(*iter), sizeof(uint32_t));
         iter += sizeof(uint32_t);
 
-        // didn't ask for this block
-        if (requestedBlockNums.find(blockNum) == requestedBlockNums.end())
-            continue;
+
 
         // read data
         uint32_t dataSize = std::min(
@@ -291,15 +289,16 @@ std::vector<Block> DiskStorage::readBlocks(
         block.dataStart = iter;
         block.dataEnd = iter + dataSize;
 
-        blocks.push_back(std::move(block));
+        // only add if we asked for this block
+        if (requestedBlockNums.find(blockNum) != requestedBlockNums.end())
+            blocks.push_back(std::move(block));
 
         iter += dataSize;
     }
 
-    std::cout << blocks.size() << " " << requestedBlockNums.size() << std::endl;
     if (blocks.size() != requestedBlockNums.size())
     {
-        throw std::runtime_error("readBlocks() - all requested blocks weren't read");
+        throw std::runtime_error("readBlocks() - num. blocks read != num. blocks requested");
     }
         
     return blocks;

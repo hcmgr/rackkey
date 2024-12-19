@@ -813,6 +813,8 @@ int main()
 
 /*
 TODO:
+    - fix 1 < R < N replication factor
+    - test replication in disk_storage tests
     - replication
         - first, need to send block numbers on GET (and maybe DELETE)
             - each storage node will store more than any GET requires of it,

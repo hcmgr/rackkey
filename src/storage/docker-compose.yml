@@ -38,4 +38,17 @@ services:
       - NODE_ID=2
     restart: always
     container_name: Node_2
+
+  storage-node-3:
+    image: storage-server
+    build:
+      context: ../
+      dockerfile: storage/Dockerfile
+    ports:
+      - "8084:8080"  
+    environment:
+      - PORT=8080
+      - NODE_ID=3
+    restart: always
+    container_name: Node_3
   ##########################

@@ -7,6 +7,7 @@
 #include <iostream>
 #include <cstdint>
 #include <filesystem>
+#include <unordered_set>
 
 using namespace web;
 using namespace web::http;
@@ -44,7 +45,8 @@ namespace PrintUtils {
     void printVector(const std::vector<T>& vec) 
     {
         std::cout << "[ ";
-        for (size_t i = 0; i < vec.size(); ++i) {
+        for (size_t i = 0; i < vec.size(); ++i) 
+        {
             std::cout << vec[i];
             if (i != vec.size() - 1) {
                 std::cout << ", ";
@@ -54,10 +56,28 @@ namespace PrintUtils {
     }
 
     /**
+     * Pretty-print std::unordered_set<T>
+     */
+    template<typename T>
+    void printUnorderedSet(const std::unordered_set<T>& set) 
+    {
+        std::cout << "{ ";
+        int cnt = 0;
+        for (auto &el : set)
+        {
+            std::cout << el;
+            if (cnt++ != set.size() - 1)
+                std::cout << ", ";
+        }
+        std::cout << " }" << std::endl;
+    }
+
+    /**
      * Pretty-print std::map<K, V>
      */
     template <typename K, typename V>
-    void printMap(const std::map<K, V>& m) {
+    void printMap(const std::map<K, V>& m) 
+    {
         std::cout << "{\n";
         for (const auto& pair : m) {
             std::cout << "  " << pair.first << ": " << pair.second << "\n";
