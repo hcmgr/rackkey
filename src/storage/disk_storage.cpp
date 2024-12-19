@@ -1,4 +1,5 @@
 #include <string>
+#include <unordered_set>
 
 #include "disk_storage.hpp"
 
@@ -6,7 +7,6 @@
 #include "block.hpp"
 #include "crypto.hpp"
 #include "free_space.hpp"
-
 #include "test_utils.hpp"
 
 namespace fs = std::filesystem;
@@ -224,7 +224,7 @@ DiskStorage::~DiskStorage()
  */
 std::vector<Block> DiskStorage::readBlocks(
     std::string key, 
-    std::vector<uint32_t> blockNums,
+    std::unordered_set<uint32_t> requestedBlockNums,
     uint32_t dataBlockSize, 
     std::vector<unsigned char> &readBuffer)
 {
@@ -273,6 +273,10 @@ std::vector<Block> DiskStorage::readBlocks(
         std::memcpy(&blockNum, &(*iter), sizeof(uint32_t));
         iter += sizeof(uint32_t);
 
+        // didn't ask for this block
+        if (requestedBlockNums.find(blockNum) == requestedBlockNums.end())
+            continue;
+
         // read data
         uint32_t dataSize = std::min(
             dataBlockSize,
@@ -291,6 +295,10 @@ std::vector<Block> DiskStorage::readBlocks(
 
         iter += dataSize;
     }
+
+    std::cout << blocks.size() << " " << requestedBlockNums.size() << std::endl;
+    if (blocks.size() != requestedBlockNums.size())
+        throw std::runtime_error("readBlocks() - all requested blocks weren't read");
         
     return blocks;
 }
@@ -762,7 +770,7 @@ namespace DiskStorageTests
         // write all blocks
         auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
         std::vector<Block> writeBlocks = p.first;
-        std::vector<uint32_t> blockNums = p.second;
+        std::unordered_set<uint32_t> blockNums = p.second;
 
         std::cout << writeBlocks.size() << std::endl;
         ds.writeBlocks(key, writeBlocks);
@@ -802,7 +810,7 @@ namespace DiskStorageTests
 
         std::vector<std::string> keys;
         std::vector<std::vector<Block>> writeBlocksList;
-        std::vector<std::vector<uint32_t>> writeBlockNumsList;
+        std::vector<std::unordered_set<uint32_t>> writeBlockNumsList;
         std::vector<std::vector<std::vector<unsigned char>>> writeDataBuffersList;
 
         uint32_t M = 1; // num. different keys we write
@@ -821,7 +829,7 @@ namespace DiskStorageTests
             // std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
             auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
             std::vector<Block> writeBlocks = p.first;
-            std::vector<uint32_t> writeBlockNums = p.second;
+            std::unordered_set<uint32_t> writeBlockNums = p.second;
             ds.writeBlocks(key, writeBlocks);
 
             // Store for later validation
@@ -842,7 +850,7 @@ namespace DiskStorageTests
 
             std::string& key = keys[i];
             std::vector<Block>& expectedBlocks = writeBlocksList[i];
-            std::vector<uint32_t>& blockNums = writeBlockNumsList[i];
+            std::unordered_set<uint32_t>& blockNums = writeBlockNumsList[i];
             std::vector<unsigned char> totalWriteBuffer = VectorUtils::flatten(writeDataBuffersList[i]);
 
             std::cout << "Expected blocks: " << std::endl << std::endl;
@@ -868,6 +876,78 @@ namespace DiskStorageTests
         teardown();
     }
 
+    /**
+     * Tests that we can write N blocks, then later read a chosen subset
+     * of M < N blocks.
+     */
+    void testCanReadSubsetOfBlocks()
+    {
+        setup();
+
+        /**
+         * Write N random blocks
+         */
+        uint32_t dataBlockSize = 40;
+        uint32_t diskBlockSize = 20;
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30);
+
+        std::string key = "archive.zip";
+        uint32_t N = 10;
+        uint32_t numDataBytes = N * dataBlockSize;
+        std::vector<std::vector<unsigned char>> writeDataBuffers;
+
+        auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = p.first;
+        std::unordered_set<uint32_t> blockNums = p.second;
+
+        ds.writeBlocks(key, writeBlocks);
+
+        /**
+         * Build up map of block num -> Block object
+         */
+        std::map<uint32_t, Block> blockMap;
+        for (auto &block : writeBlocks)
+            blockMap[block.blockNum] = block;
+
+        /**
+         * Chose subset of M < N blocks
+         */
+        uint32_t M = N / 2;
+        std::unordered_set<uint32_t> newBlockNums;
+        int cnt = 0;
+        for (auto bn : blockNums)
+        {
+            if (cnt == M)
+                break;
+
+            newBlockNums.insert(bn);
+            cnt++;
+        }
+
+        ASSERT_THAT(newBlockNums.size() == M);
+
+        /**
+         * Retreive the M blocks
+         */
+        std::vector<unsigned char> readBuffer;
+        std::vector<Block> readBlocks = ds.readBlocks(key, newBlockNums, dataBlockSize, readBuffer);
+
+        ASSERT_THAT(readBlocks.size() == newBlockNums.size());
+
+        for (auto &readBlock : readBlocks)
+        {
+            ASSERT_THAT(newBlockNums.find(readBlock.blockNum) != newBlockNums.end());
+
+            Block expectedBlockObject = blockMap[readBlock.blockNum];
+            ASSERT_THAT(readBlock.equals(expectedBlockObject));
+        }
+
+        teardown();
+    }
+
+    /**
+     * Tests that we can delete one key's blocks.
+     */
     void testCanDeleteOneKeysBlocks()
     {
         setup();
@@ -1223,6 +1303,7 @@ namespace DiskStorageTests
             TEST(testCanWriteAndReadNewHeaderAndBat),
             TEST(testCanWriteAndReadOneKeysBlocks),
             TEST(testCanWriteAndReadMultipleKeysBlocks),
+            TEST(testCanReadSubsetOfBlocks),
             TEST(testCanDeleteOneKeysBlocks),
             TEST(testCanBuildUpFreeSpaceMapFromExistingFile),
             TEST(testCanOverwriteExistingKey),

@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 #include <random>
+#include <unordered_set>
 
 #include "block.hpp"
 #include "utils.hpp"
@@ -184,7 +185,7 @@ namespace BlockUtils
      * 
      * NOTE: used to write tests for Block and other modules.
      */
-    std::pair<std::vector<Block>, std::vector<uint32_t>> generateRandom(
+    std::pair<std::vector<Block>, std::unordered_set<uint32_t>> generateRandom(
         std::string key, 
         uint32_t blockSize,
         uint32_t numBytes,
@@ -192,7 +193,7 @@ namespace BlockUtils
     )
     {
         std::vector<Block> blocks;
-        std::vector<uint32_t> blockNums;
+        std::unordered_set<uint32_t> blockNums;
 
         // create random data for blocks - upper case letters
         std::random_device rd;
@@ -218,7 +219,7 @@ namespace BlockUtils
                 dataBuffers.back().end()
             );
 
-            blockNums.push_back(blockNum++);
+            blockNums.insert(blockNum++);
         }
 
         return {blocks, blockNums};
@@ -241,7 +242,7 @@ namespace BlockTests
 
         auto p = BlockUtils::generateRandom("archive.zip", blockSize, numBytes, dataBuffers);
         std::vector<Block> blocks = p.first;
-        std::vector<uint32_t> blockNums = p.second;
+        std::unordered_set<uint32_t> blockNums = p.second;
 
         // Pretty print the blocks before serialization
         std::cout << "Before Serialization:" << std::endl << std::endl;

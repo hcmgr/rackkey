@@ -4,7 +4,7 @@
 
 #include <iostream>
 #include <map>
-#include <set>
+#include <unordered_set>
 #include <chrono>
 #include <thread>
 #include <mutex>
@@ -572,7 +572,7 @@ public:
         }
 
         // Find all nodes that store at least 1 block for `key`
-        std::set<uint32_t> nodeIds;
+        std::unordered_set<uint32_t> nodeIds;
         std::shared_ptr<std::map<uint32_t, uint32_t>> blockNodeMap = this->keyBlockNodeMap[key];
 
         for (auto p : *(blockNodeMap))
@@ -774,8 +774,9 @@ TODO:
     - implement concurrent r/w protections for DiskStorage
         - see bottom of server.cpp for plan
     - make .then() code non-blocking (related to concurrent r/w)
+
     - group together and separate out handlers into nice abstraction
-    
+    - make a dedicated 'docker' directory for storage/
     - authenticate requests from master -> server
         - token or generated API key
     - sort out documentation

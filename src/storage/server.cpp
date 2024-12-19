@@ -5,6 +5,7 @@
 #include <string>
 #include <iostream>
 #include <cstdlib>
+#include <set>
 
 #include "block.hpp"
 #include "utils.hpp"
@@ -49,7 +50,7 @@ public:
         /**
          * Get block numbers from request payload
          */
-        std::vector<uint32_t> blockNums;
+        std::unordered_set<uint32_t> blockNums;
 
         auto task = request.extract_vector()
         .then([&](std::vector<unsigned char> payload)
@@ -61,7 +62,7 @@ public:
                 std::memcpy(&blockNum, &(*it), sizeof(blockNum));
                 it += sizeof(blockNum);
 
-                blockNums.push_back(blockNum);
+                blockNums.insert(blockNum);
             }
         });
 
@@ -216,8 +217,8 @@ public:
 
 void run()
 {
-    StorageServer storageServer = StorageServer();
-    storageServer.startServer();
+    // StorageServer storageServer = StorageServer();
+    // storageServer.startServer();
 
     DiskStorageTests::runAll();
 }

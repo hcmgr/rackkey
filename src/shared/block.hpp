@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <string>
+#include <unordered_set>
 
 /**
  * Represents an I/O block.
@@ -72,7 +73,7 @@ namespace BlockUtils
      * 
      * NOTE: used to write tests for Block and other modules.
      */
-    std::pair<std::vector<Block>, std::vector<uint32_t>> generateRandom(
+    std::pair<std::vector<Block>, std::unordered_set<uint32_t>> generateRandom(
         std::string key, 
         uint32_t blockSize,
         uint32_t numBytes,

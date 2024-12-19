@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <unordered_set>
 
 #include "utils.hpp"
 #include "block.hpp"
@@ -126,7 +127,7 @@ public:
      */
     std::vector<Block> readBlocks(
         std::string key, 
-        std::vector<uint32_t> blockNums,
+        std::unordered_set<uint32_t> blockNums,
         uint32_t dataBlockSize, 
         std::vector<unsigned char> &readBuffer);
 
@@ -241,6 +242,7 @@ namespace DiskStorageTests
     void testCanWriteAndReadNewHeaderAndBat();
     void testCanWriteAndReadOneKeysBlocks();
     void testCanWriteAndReadMultipleKeysBlocks();
+    void testCanReadSubsetOfBlocks();
     void testCanDeleteOneKeysBlocks();
     void testCanBuildUpFreeSpaceMapFromExistingFile();
     void testCanOverwriteExistingKey();
