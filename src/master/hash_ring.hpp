@@ -30,7 +30,10 @@ public:
     /* Hash function to determine virtual node's position on the ring */
     uint32_t hash();
 
+    bool equals(VirtualNode other);
+
     std::string toString();
+
 };
 
 /**

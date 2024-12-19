@@ -69,6 +69,11 @@ public:
      */
     uint32_t diskBlockSize;
 
+    /**
+     * Number of storage nodes we write each block to
+     */
+    uint32_t replicationFactor;
+
     /* Default constructor */
     Config(std::string configFilePath);
 };

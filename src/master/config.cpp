@@ -49,7 +49,10 @@ void Config::loadStorageNodeConfig()
     this->numVirtualNodes = this->jsonConfig.at(U("numVirtualNodes")).as_integer();
 
     // retreive block size
-    this->diskBlockSize = this->jsonConfig.at(U("blockSize")).as_integer();
+    this->diskBlockSize = this->jsonConfig.at(U("diskBlockSize")).as_integer();
+
+    // retreive replication factor
+    this->replicationFactor = this->jsonConfig.at(U("replicationFactor")).as_integer();
 }
 
 /**

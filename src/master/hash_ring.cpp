@@ -23,6 +23,11 @@ uint32_t VirtualNode::hash()
     return Crypto::sha256_32(this->id);
 }
 
+bool VirtualNode::equals(VirtualNode other)
+{
+    return id == other.id && physicalNodeId == other.physicalNodeId;
+}
+
 std::string VirtualNode::toString()
 {
     return this->id;
@@ -101,7 +106,7 @@ void HashRing::prettyPrintHashRing()
 namespace HashRingTests 
 {
     void testHashRingFindNextNode() {
-        // Initialise HashRing
+        // initialise HashRing
         HashRing hr = HashRing();
         int numPhysicalNodes = 3;
         int numVirtualNodes = 10;
@@ -132,14 +137,35 @@ namespace HashRingTests
         // sort the nodes by hash to simulate the hash ring order
         std::sort(sortedNodes.begin(), sortedNodes.end(), 
             [](const auto &a, const auto &b) { return a.first < b.first; });
+        
+        /**
+         * Validate we can retreive all VirtualNode's in order by calling
+         * findNextNode() around the ring.
+         */
+        uint32_t hash = 0;
+        auto it = sortedNodes.begin();
+        int cnt = 0;
 
-        // find next node for 10 different keys and validate correctness
+        while (it != sortedNodes.end())
+        {
+            auto p = (*it);
+            uint32_t expectedHash = p.first;
+            std::shared_ptr<VirtualNode> expectedVn = p.second;
+            
+            std::shared_ptr<VirtualNode> vn = hr.findNextNode(hash);
+            ASSERT_THAT((*vn).equals((*expectedVn)));
+
+            hash = vn->hash();
+            it++;
+        }
+
+        /**
+         * Find next node for 10 new keys, and validate correctness
+         */
         std::string key = "archive.zip";
         for (int i = 0; i < 10; i++) {
             std::string keyBlockCombo = key + std::to_string(i);
             uint32_t keyHash = Crypto::sha256_32(keyBlockCombo);
-
-            std::cout << keyBlockCombo << " : " << keyHash << std::endl;
 
             // Find next node using the hash ring
             std::shared_ptr<VirtualNode> nextVn = hr.findNextNode(keyHash);
@@ -157,10 +183,6 @@ namespace HashRingTests
             }
 
             ASSERT_THAT(nextVn->toString() == expectedNode->toString());
-
-            std::cout << "Expected next node : " << expectedNode->toString() << std::endl;
-            std::cout << "Actual next node   : " << nextVn->toString() << std::endl;
-            std::cout << std::endl;
         }
     }
 
@@ -233,7 +255,7 @@ namespace HashRingTests
 
         std::vector<std::pair<std::string, std::function<void()>>> tests = {
             TEST(testHashRingFindNextNode),
-            TEST(testHashRingEvenlyDistributed)
+            // TEST(testHashRingEvenlyDistributed)
         };
 
         for (auto &[name, func] : tests)

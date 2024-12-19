@@ -298,7 +298,9 @@ std::vector<Block> DiskStorage::readBlocks(
 
     std::cout << blocks.size() << " " << requestedBlockNums.size() << std::endl;
     if (blocks.size() != requestedBlockNums.size())
+    {
         throw std::runtime_error("readBlocks() - all requested blocks weren't read");
+    }
         
     return blocks;
 }
@@ -438,6 +440,8 @@ void DiskStorage::writeBlocks(std::string key, std::vector<Block> dataBlocks)
 
     // write out updated BAT
     writeBAT();
+
+    std::cout << this->bat.toString() << std::endl;
 }
 
 /**

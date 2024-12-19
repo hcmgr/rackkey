@@ -51,15 +51,15 @@ public:
     HashRing hashRing;
 
     /**
-     * Stores mapping of the form: key -> {block num -> storage node id}.
+     * Stores mapping of the form: key -> {block num -> storage node id list}.
      * 
-     * i.e. for each KEY, we store a mapping from block number to storage node
+     * i.e. for each KEY, we store a mapping from block number to a list of storage node ids.
      * 
      * Allows for fast lookup of block location.
      * 
      * NOTE: nicknamed the 'KBN' for brevity
      */
-    std::map<std::string, std::shared_ptr<std::map<uint32_t, uint32_t>>> keyBlockNodeMap;
+    std::map<std::string, std::shared_ptr<std::map<uint32_t, std::vector<uint32_t>>>> keyBlockNodeListMap;
 
     /**
      * Stores our storage nodes.
@@ -92,7 +92,7 @@ public:
     /* Default constructor */
     MasterServer(std::string configFilePath) 
         : hashRing(),
-          keyBlockNodeMap(),
+          keyBlockNodeListMap(),
           config(configFilePath)
     {
         addInitialStorageNodes();
@@ -114,19 +114,31 @@ public:
     void calculateAndShowBlockDistribution(std::string key) 
     {
         std::map<uint32_t, uint32_t> nodeBlockCounts; // node id -> block count
-        uint32_t totalNumBlocks = this->keyBlockNodeMap[key]->size();
         
-        for (auto p : *(this->keyBlockNodeMap[key]))
+        std::map<uint32_t, std::vector<uint32_t>> blockNodeListMap = *(this->keyBlockNodeListMap[key]);
+        uint32_t totalNumBlocks = blockNodeListMap.size();
+        uint32_t totalNumReplicatedBlocks = 0;
+
+        for (auto p: blockNodeListMap)
         {
-            uint32_t nodeId = p.second;
+            uint32_t blockNum = p.first; 
+            std::vector<uint32_t> nodeIds = p.second;
 
-            if (nodeBlockCounts.find(nodeId) == nodeBlockCounts.end())
-                nodeBlockCounts[nodeId] = 0;
+            std::cout << blockNum << std::endl;
 
-            nodeBlockCounts[nodeId]++;
+            for (auto nodeId : nodeIds)
+            {
+                if (nodeBlockCounts.find(nodeId) == nodeBlockCounts.end())
+                    nodeBlockCounts[nodeId] = 0;
+                nodeBlockCounts[nodeId]++;
+                totalNumReplicatedBlocks++;
+
+                std::cout << nodeId << std::endl;
+            }
         }
 
-        std::cout << "Blocks: " << totalNumBlocks << std::endl;
+        std::cout << "Num. unique blocks: " << totalNumBlocks << std::endl;
+        std::cout << "Total num. blocks (including replicas): " << totalNumReplicatedBlocks << std::endl;
         std::cout << "Distribution:" << std::endl;
         PrintUtils::printMap(nodeBlockCounts);
     }
@@ -289,25 +301,41 @@ public:
         std::cout << "GET req received: " << key << std::endl;
 
         // check key exists
-        if (this->keyBlockNodeMap.find(key) == this->keyBlockNodeMap.end())
+        if (this->keyBlockNodeListMap.find(key) == this->keyBlockNodeListMap.end())
         {
             std::cout << "GET: failed - key doesn't exist" << std::endl;
             request.reply(status_codes::InternalError);
             return;
         }
 
-        std::shared_ptr<std::map<uint32_t, uint32_t>> blockNodeMap = this->keyBlockNodeMap[key];
+        std::shared_ptr<std::map<uint32_t, std::vector<uint32_t>>> blockNodeMap = this->keyBlockNodeListMap[key];
         
         /**
-         * Build up a mapping of the form: {node id -> block numbers}
+         * For each block, we chose the first healthy storage node that
+         * stores it.
+         * 
+         * We store our 'choices' in nodeBlockMap, which is a mapping
+         * of the form: {node id -> block num list}.
          */
         std::map<uint32_t, std::vector<uint32_t>> nodeBlockMap;
         for (auto p : *(blockNodeMap))        
         {
             uint32_t blockNum = p.first;
-            uint32_t nodeId = p.second;
+            std::vector<uint32_t> nodeIds = p.second;
 
-            nodeBlockMap[nodeId].push_back(blockNum);
+            bool foundHealthy = false;
+            for (auto nodeId : nodeIds)
+            {
+                if (this->nodeHealthMap[nodeId])
+                {
+                    nodeBlockMap[nodeId].push_back(blockNum);
+                    foundHealthy = true;
+                    break;
+                }
+            }
+
+            if (!foundHealthy)
+                throw std::runtime_error("Error: no health nodes available for block " + std::to_string(blockNum));
         }
 
         // mapping of the form: {block num. -> block object}
@@ -367,25 +395,25 @@ public:
     }
 
     /**
-     * Sends the given list of blocks to the given physical node.
+     * Sends the given list of blocks to the given storage node.
      * 
      * All blocks are sent in a single PUT request to the given 
-     * physical node.
+     * storage node.
      */
     pplx::task<void> sendBlocks(
         uint32_t storageNodeId,
         std::string key,
         std::vector<Block> &blocks,
-        std::shared_ptr<std::map<uint32_t, uint32_t>> blockNodeMap
+        std::shared_ptr<std::map<uint32_t, std::vector<uint32_t>>> blockNodeMap
     )
     {
         std::shared_ptr<StorageNode> sn = this->storageNodes[storageNodeId];
 
         auto client = getHttpClient(sn);
-        
+
         // populate body
         std::vector<unsigned char> payloadBuffer;
-        for (auto block : blocks)
+        for (auto &block : blocks)
         {
             block.serialize(payloadBuffer);
         }
@@ -410,9 +438,9 @@ public:
             // assign blocks to their nodes
             .then([=]()
             {
-                for (auto block : blocks)
+                for (auto &block : blocks)
                 {
-                    blockNodeMap->insert({block.blockNum, storageNodeId});
+                    (*blockNodeMap)[block.blockNum].push_back(storageNodeId);
                 }
             });
 
@@ -432,7 +460,7 @@ public:
         // Timing point: start
         auto start = std::chrono::high_resolution_clock::now();
             
-        auto blockNodeMap = std::make_shared<std::map<uint32_t, uint32_t>>();
+        auto blockNodeMap = std::make_shared<std::map<uint32_t, std::vector<uint32_t>>>();
         auto payloadPtr = std::make_shared<std::vector<unsigned char>>();
 
         std::vector<pplx::task<void>> sendBlockTasks;
@@ -452,34 +480,55 @@ public:
 
             for (uint32_t i = 0; i < payloadSize; i += config.diskBlockSize) 
             {
+                // construct the block
                 uint32_t blockNum = blockCnt++;
-
-                std::string hashInput = key + std::to_string(blockNum);
-                uint32_t hash = Crypto::sha256_32(hashInput);
-                std::shared_ptr<VirtualNode> vn = this->hashRing.findNextNode(hash);
-                
                 auto blockStart = payloadPtr->begin() + i;
                 auto blockEnd = payloadPtr->begin() + std::min(i + config.diskBlockSize, payloadSize);
-                auto blockSize = blockEnd - blockStart;
+                auto dataSize = blockEnd - blockStart;
 
-                Block block(key, blockNum, blockSize, blockStart, blockEnd);
-                nodeBlockMap[vn->physicalNodeId].push_back(std::move(block));
+                Block block(key, blockNum, dataSize, blockStart, blockEnd);
+
+                uint32_t R = this->config.replicationFactor; // replication factor
+
+                /**
+                 * Find next R distinct physical nodes and add the block to the
+                 * nodes' block list (where R is our replication factor).
+                 */
+                std::string hashInput = key + std::to_string(blockNum);
+                uint32_t hash = Crypto::sha256_32(hashInput);
+                std::unordered_set<uint32_t> assignedPhysicalNodes;
+                int cnt = 0;
+
+                while (cnt < R)
+                {
+                    std::shared_ptr<VirtualNode> vn = this->hashRing.findNextNode(hash);
+
+                    // make sure we don't assign to the same physical node twice
+                    if (assignedPhysicalNodes.find(vn->physicalNodeId) == assignedPhysicalNodes.end())
+                    {
+                        nodeBlockMap[vn->physicalNodeId].push_back(block);
+                        assignedPhysicalNodes.insert(vn->physicalNodeId);
+                        cnt++;
+                    }
+
+                    hash = vn->hash();
+                }
             }
 
             return nodeBlockMap;
         })
 
-        // send all blocks for given node at once
+        // send each storage node its block list
         .then([&](std::map<uint32_t, std::vector<Block>> nodeBlockMap)
         {
             auto sendStart = std::chrono::high_resolution_clock::now();
 
             for (auto p : nodeBlockMap)
             {
-                uint32_t physicalNodeId = p.first;
+                uint32_t storageNodeId = p.first;
                 std::vector<Block> blocks = p.second;
 
-                auto task = sendBlocks(physicalNodeId, key, blocks, blockNodeMap);
+                auto task = sendBlocks(storageNodeId, key, blocks, blockNodeMap);
                 sendBlockTasks.push_back(task);
             }
 
@@ -490,7 +539,7 @@ public:
                 try
                 {
                     allTasks.get();
-                    this->keyBlockNodeMap[key] = blockNodeMap;
+                    this->keyBlockNodeListMap[key] = blockNodeMap;
                 }
                 catch (const std::exception& e)
                 {
@@ -522,7 +571,7 @@ public:
     }
 
     /**
-     * Deletes all blocks correpsonding to key `key` from node with id `physicalNodeId`.
+     * Deletes all blocks correpsonding to key `key` from node with id `storageNodeId`.
      */
     pplx::task<void> deleteBlocks(uint32_t storageNodeId, std::string key)
     {
@@ -564,7 +613,7 @@ public:
         std::cout << "DEL req received: " << key << std::endl;
 
         // check key exists
-        if (this->keyBlockNodeMap.find(key) == this->keyBlockNodeMap.end())
+        if (this->keyBlockNodeListMap.find(key) == this->keyBlockNodeListMap.end())
         {
             std::cout << "DEL: failed - key doesn't exist" << std::endl;
             request.reply(status_codes::InternalError);
@@ -572,19 +621,20 @@ public:
         }
 
         // Find all nodes that store at least 1 block for `key`
-        std::unordered_set<uint32_t> nodeIds;
-        std::shared_ptr<std::map<uint32_t, uint32_t>> blockNodeMap = this->keyBlockNodeMap[key];
+        std::unordered_set<uint32_t> allNodeIds;
+        std::shared_ptr<std::map<uint32_t, std::vector<uint32_t>>> blockNodeMap = this->keyBlockNodeListMap[key];
 
         for (auto p : *(blockNodeMap))
         {
-            uint32_t nodeId = p.second;
-            nodeIds.insert(nodeId);
+            std::vector<uint32_t> nodeIds;
+            for (auto nodeId : nodeIds)
+                allNodeIds.insert(nodeId);
         }
 
         std::vector<pplx::task<void>> delBlockTasks;
 
         // call `deleteBlocks` for each node
-        for (uint32_t nodeId : nodeIds)
+        for (uint32_t nodeId : allNodeIds)
         {
             auto task = deleteBlocks(nodeId, key);
             delBlockTasks.push_back(task);
@@ -612,7 +662,7 @@ public:
             return;
         
         // remove key's entry from KBN entirely
-        this->keyBlockNodeMap.erase(key);
+        this->keyBlockNodeListMap.erase(key);
 
         // success response
         std::cout << "DEL: successful" << std::endl;
@@ -630,7 +680,7 @@ public:
         std::cout << "GET /keys req received" << std::endl;
 
         std::ostringstream oss;
-        for (const auto &p : keyBlockNodeMap)
+        for (const auto &p : keyBlockNodeListMap)
             oss << p.first << "\n";
         
         request.reply(status_codes::OK, oss.str());
@@ -753,6 +803,7 @@ void run()
     masterServer.startServer();
 
     // MasterServerTests::runAll();
+    // HashRingTests::runAll();
 }
 
 int main() 

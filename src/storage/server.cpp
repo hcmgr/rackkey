@@ -217,10 +217,10 @@ public:
 
 void run()
 {
-    // StorageServer storageServer = StorageServer();
-    // storageServer.startServer();
+    StorageServer storageServer = StorageServer();
+    storageServer.startServer();
 
-    DiskStorageTests::runAll();
+    // DiskStorageTests::runAll();
 }
 
 int main()
