@@ -15,6 +15,7 @@
 #include "config.hpp"
 #include "block.hpp"
 #include "test_utils.hpp"
+#include "master_config.hpp"
 
 using namespace web;
 using namespace web::http;
@@ -87,7 +88,7 @@ public:
     /**
      * Stores configuration of our service (e.g. storage node IPs)
      */
-    Config config;
+    MasterConfig config;
 
     /* Default constructor */
     MasterServer(std::string configFilePath) 
@@ -483,12 +484,12 @@ public:
 
             std::map<uint32_t, std::vector<Block>> nodeBlockMap;
 
-            for (uint32_t i = 0; i < payloadSize; i += config.diskBlockSize) 
+            for (uint32_t i = 0; i < payloadSize; i += 4096) 
             {
                 // construct the block
                 uint32_t blockNum = blockCnt++;
                 auto blockStart = payloadPtr->begin() + i;
-                auto blockEnd = payloadPtr->begin() + std::min(i + config.diskBlockSize, payloadSize);
+                auto blockEnd = payloadPtr->begin() + std::min(i + 4096, payloadSize);
                 auto dataSize = blockEnd - blockStart;
 
                 Block block(key, blockNum, dataSize, blockStart, blockEnd);
@@ -803,7 +804,7 @@ namespace MasterServerTests {
 
 void run()
 {    
-    std::string configFilePath = "../config.json";
+    std::string configFilePath = "../src/config.json";
     MasterServer masterServer = MasterServer(configFilePath);
     masterServer.startServer();
 

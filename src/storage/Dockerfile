@@ -17,6 +17,7 @@ WORKDIR /app
 COPY ./storage/CMakeLists.txt /app/
 COPY ./storage /app/storage
 COPY ./shared /app/shared
+COPY ./config.json /app/
 
 RUN mkdir build && cd build && cmake .. && make
 

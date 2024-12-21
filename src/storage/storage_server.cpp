@@ -10,6 +10,7 @@
 #include "block.hpp"
 #include "utils.hpp"
 #include "disk_storage.hpp"
+#include "storage_config.hpp"
 
 using namespace web;
 using namespace web::http;
@@ -19,6 +20,8 @@ using namespace web::http::experimental::listener;
 class StorageServer
 {
 private:
+    StorageConfig config;
+
     /**
      * On-disk storage
      */
@@ -29,8 +32,9 @@ public:
     /**
      * Default constructor
      */
-    StorageServer()
-        : diskStorage("rackkey", "store", 4096, 1u << 30, true)
+    StorageServer(std::string configFilePath)
+        : config(configFilePath),
+          diskStorage("rackkey", "store", config.diskBlockSize, 1u << config.maxDataSizePower, true)
     {
     }
 
@@ -217,7 +221,8 @@ public:
 
 void run()
 {
-    StorageServer storageServer = StorageServer();
+    std::string configFilePath = "/app/config.json";
+    StorageServer storageServer = StorageServer(configFilePath);
     storageServer.startServer();
 
     // DiskStorageTests::runAll();
