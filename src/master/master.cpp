@@ -234,7 +234,8 @@ public:
         uint32_t storageNodeId,
         std::string key,
         std::vector<uint32_t> blockNums,
-        std::shared_ptr<std::map<uint32_t, Block>> blockMap
+        std::shared_ptr<std::map<uint32_t, Block>> blockMap,
+        std::shared_ptr<std::vector<unsigned char>> responsePayload
     )
     {
         std::shared_ptr<StorageNode> sn = this->storageNodes[storageNodeId];
@@ -260,7 +261,7 @@ public:
         req.set_request_uri(U("/store/" + key));
         req.set_body(requestPayload);
 
-        auto responsePayload = std::make_shared<std::vector<unsigned char>>();
+        // auto responsePayload = std::make_shared<std::vector<unsigned char>>();
 
         return client->request(req)
         .then([=](http_response response)
@@ -340,6 +341,7 @@ public:
 
         // mapping of the form: {block num. -> block object}
         auto blockMap = std::make_shared<std::map<uint32_t, Block>>();
+        std::vector<std::shared_ptr<std::vector<unsigned char>>> responsePayloads;
         
         /**
          * Call `getBlocks` for each node and wait on all tasks 
@@ -351,7 +353,10 @@ public:
             uint32_t nodeId = p.first;
             std::vector<uint32_t> blockNums = p.second;
 
-            auto task = getBlocks(nodeId, key, blockNums, blockMap);
+            auto responsePayload = std::make_shared<std::vector<unsigned char>>();
+            responsePayloads.push_back(responsePayload);
+
+            auto task = getBlocks(nodeId, key, blockNums, blockMap, responsePayload);
             getBlockTasks.push_back(task);
         }
 

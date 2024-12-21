@@ -273,8 +273,6 @@ std::vector<Block> DiskStorage::readBlocks(
         std::memcpy(&blockNum, &(*iter), sizeof(uint32_t));
         iter += sizeof(uint32_t);
 
-
-
         // read data
         uint32_t dataSize = std::min(
             dataBlockSize,
