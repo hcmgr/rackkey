@@ -30,6 +30,6 @@ void Config::loadConfigFile()
 Config::Config(std::string configFilePath)
     : configFilePath(configFilePath)
 {
-    loadConfigFile();
+    this->loadConfigFile();
 }
 

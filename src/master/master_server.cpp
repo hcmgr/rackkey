@@ -346,7 +346,7 @@ public:
             }
 
             if (!foundHealthy)
-                throw std::runtime_error("Error: no health nodes available for block " + std::to_string(blockNum));
+                throw std::runtime_error("Error: no healthy nodes available for block " + std::to_string(blockNum));
         }
 
         // mapping of the form: {block num. -> block object}
@@ -853,12 +853,15 @@ TODO:
     - implement concurrent r/w protections for DiskStorage
         - see bottom of server.cpp for plan
     - make .then() code non-blocking (related to concurrent r/w)
-    - group together and separate out handlers into nice abstraction
-    - make a dedicated 'docker' directory for storage/
-    - way to run all tests with one command
-    - authenticate requests from master -> server
-        - token or generated API key
-    - sort out documentation
+
+    potentially:
+        - group together and separate out handlers into nice abstraction
+        - make a dedicated 'docker' directory for storage/
+        - way to run all tests with one command
+        - authenticate requests from master -> server
+            - token or generated API key
+        - if writing out more nodes in docker-compose.yml gets annoying, 
+          write python script to generate one (probs makes stuff just less clear though)
 
 WITH REPLICATION PLAN:
     GET:

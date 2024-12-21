@@ -28,17 +28,19 @@ protected:
 public:
     /**
      * Load all variables from `jsonConfig` into member
-     * variables of derived classes
+     * variables of the current class.
+     * 
+     * NOTE:
+     * 
+     * As derived classes of Config, MasterConfig and StorageConfig 
+     * implement their own loadVariables() functions that are called
+     * in their respective constructors.
      */
     virtual void loadVariables() = 0;
     virtual ~Config() = default;
 
     /**
      * Param constructor
-     * 
-     * NOTE: 
-     * 
-     * loadAll() is called in here
      */
     Config(std::string configFilePath);
 };
