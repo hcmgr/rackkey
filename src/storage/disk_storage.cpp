@@ -163,7 +163,7 @@ std::string BAT::toString()
 ////////////////////////////////////////////
 
 /**
- * Default constructor
+ * Param constructor
  */
 DiskStorage::DiskStorage(
     std::string storeDirPath,
@@ -296,6 +296,7 @@ std::vector<Block> DiskStorage::readBlocks(
         iter += dataSize;
     }
 
+    std::cout << blocks.size() << " " << requestedBlockNums.size() << std::endl;
     if (blocks.size() != requestedBlockNums.size())
     {
         throw std::runtime_error("readBlocks() - num. blocks read != num. blocks requested");
@@ -721,7 +722,7 @@ namespace DiskStorageTests
         uint32_t diskBlockSize = 20;
 
         // implictly creates and writes header
-        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30);
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30, true);
 
         // write N data blocks
         std::string key = "archive.zip";
@@ -743,7 +744,7 @@ namespace DiskStorageTests
         BAT oldBat = ds.bat;
 
         // instantiate new object so don't have header or BAT cached (i.e. must read from disk)
-        DiskStorage newDs = DiskStorage("rackkey", "store");
+        DiskStorage newDs = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30, true);
 
         Header newHeader = newDs.header;
         BAT newBat = ds.bat;
@@ -763,7 +764,7 @@ namespace DiskStorageTests
 
         uint32_t dataBlockSize = 40;
         uint32_t diskBlockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30);
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30, true);
 
         std::string key = "archive.zip";
         uint32_t N = 2;
@@ -779,7 +780,7 @@ namespace DiskStorageTests
         ds.writeBlocks(key, writeBlocks);
 
         // instantiate new object so don't have header, bat or file stream cached (i.e. must read from disk)
-        DiskStorage newDs = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30);
+        DiskStorage newDs = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30, false);
 
         // read blocks
         std::vector<unsigned char> readBuffer;
@@ -809,7 +810,7 @@ namespace DiskStorageTests
 
         uint32_t dataBlockSize = 40;
         uint32_t diskBlockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30);
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30, true);
 
         std::vector<std::string> keys;
         std::vector<std::vector<Block>> writeBlocksList;
@@ -829,7 +830,6 @@ namespace DiskStorageTests
             std::vector<std::vector<unsigned char>> writeDataBuffers;
 
             // Generate and write blocks
-            // std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
             auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
             std::vector<Block> writeBlocks = p.first;
             std::unordered_set<uint32_t> writeBlockNums = p.second;
@@ -842,7 +842,7 @@ namespace DiskStorageTests
         }
 
         // Instantiate new object to ensure no cached data (read from disk)
-        DiskStorage newDs = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30);
+        DiskStorage newDs = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30, false);
 
         // Read and validate data for each key
         for (uint32_t i = 0; i < M; i++) 
@@ -892,7 +892,7 @@ namespace DiskStorageTests
          */
         uint32_t dataBlockSize = 40;
         uint32_t diskBlockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30);
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30, true);
 
         std::string key = "archive.zip";
         uint32_t N = 10;
@@ -957,7 +957,7 @@ namespace DiskStorageTests
 
         uint32_t dataBlockSize = 40;
         uint32_t diskBlockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30);
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30, true);
 
         // write some blocks
         std::string key = "archive.zip";
@@ -996,7 +996,7 @@ namespace DiskStorageTests
 
         uint32_t dataBlockSize = 40;
         uint32_t diskBlockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 10);
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 10, true);
 
         // write some blocks
         std::string key = "archive.zip";
@@ -1022,7 +1022,7 @@ namespace DiskStorageTests
         ds.writeBlocks(newKey, writeBlocks);
 
         // create a new DiskStorage object - to force an initialisation from file
-        DiskStorage newDs = DiskStorage("rackkey", "store", diskBlockSize, 1u << 10);
+        DiskStorage newDs = DiskStorage("rackkey", "store", diskBlockSize, 1u << 10, false);
 
         std::cout << numDiskBlocks << " " << newNumDiskBlocks << std::endl;
         std::cout << newDs.freeSpaceMap.toString() << std::endl;
@@ -1041,7 +1041,7 @@ namespace DiskStorageTests
 
         uint32_t dataBlockSize = 40;
         uint32_t diskBlockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30);
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30, true);
 
         std::string key = "archive.zip";
         uint32_t N = 5;
@@ -1099,7 +1099,7 @@ namespace DiskStorageTests
 
         uint32_t dataBlockSize = 40;
         uint32_t diskBlockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30);
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 30, true);
 
         std::string key1 = "archive.zip";
         uint32_t N = 3;
@@ -1159,7 +1159,7 @@ namespace DiskStorageTests
 
         uint32_t diskBlockSize = 4096;
         uint32_t dataBlockSize = diskBlockSize - sizeof(uint32_t);
-        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 20);
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 20, true);
 
         /**
          * 1MB max data size (2^20), 4KB disk block size (2^12) -> 2^8 raw blocks
@@ -1239,7 +1239,7 @@ namespace DiskStorageTests
 
         uint32_t dataBlockSize = 40;
         uint32_t diskBlockSize = 20;
-        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 20);
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 20, true);
 
         // should successfully write N blocks
         std::string key = "archive.zip";

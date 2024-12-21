@@ -97,14 +97,14 @@ public:
     FreeSpaceMap freeSpaceMap;
 
     /**
-     * Default constructor
+     * Param constructor
      */
     DiskStorage(
-        std::string storeDirPath = "rackkey",
-        std::string storeFileName = "store",
-        uint32_t diskBlockSize = 4096,
-        uint32_t maxDataSize = 1u << 30,
-        bool removeExistingStore = false
+        std::string storeDirPath,
+        std::string storeFileName,
+        uint32_t diskBlockSize,
+        uint32_t maxDataSize,
+        bool removeExistingStore
     );
 
     ~DiskStorage();

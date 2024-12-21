@@ -10,6 +10,7 @@
 #include "block.hpp"
 #include "utils.hpp"
 #include "disk_storage.hpp"
+#include "storage_config.hpp"
 
 using namespace web;
 using namespace web::http;
@@ -19,6 +20,12 @@ using namespace web::http::experimental::listener;
 class StorageServer
 {
 private:
+
+    /**
+     * Stores configuration of this storage node
+     */
+    StorageConfig config;
+
     /**
      * On-disk storage
      */
@@ -29,15 +36,27 @@ public:
     /**
      * Default constructor
      */
-    StorageServer()
-        : diskStorage("rackkey", "store", 4096, 1u << 30, true)
+    StorageServer(
+        std::string storeDirPath,
+        std::string storeFileName,
+        bool removeExistingStore
+    )
+        : config("/app/config.json"),
+          diskStorage(
+            storeDirPath, 
+            storeFileName, 
+            // config.diskBlockSize, 
+            // 1u << config.maxDataSizePower,
+            4096,
+            1u << 30,
+            true)
     {
     }
 
     /**
      * Retreives blocks of the given `key` from storage.
      * 
-     * TODO: fix hard coding of block size
+     * TODO: fix hard coding of data block size
      */
     void getHandler(http_request request, std::string key)
     {
@@ -88,6 +107,8 @@ public:
         {
             block.serialize(payloadBuffer);
         }
+
+        std::cout << "GET: successful" << std::endl;
 
         // build and send response
         http_response response(status_codes::OK);
@@ -147,6 +168,8 @@ public:
             std::cout << e.what() << std::endl;
             request.reply(status_codes::InternalError);
         }
+         
+        std::cout << "PUT: successful" << std::endl;
 
         request.reply(status_codes::OK);
         return;
@@ -180,7 +203,13 @@ public:
         try {
             listener
                 .open()
-                .then([&addr](){ std::cout << "Storage server is listening at: " << addr << std::endl; });
+                .then([&addr]()
+                { 
+                    std::cout << "=========================" << std::endl;
+                    std::cout << "Another node" << std::endl;
+                    std::cout << "=========================" << std::endl;
+                    std::cout << "Storage server is listening at: " << addr << std::endl; 
+                });
             while (1);
         } catch (const std::exception& e) {
             std::cout << "An error occurred: " << e.what() << std::endl;
@@ -217,7 +246,7 @@ public:
 
 void run()
 {
-    StorageServer storageServer = StorageServer();
+    StorageServer storageServer = StorageServer("rackkey", "store", true);
     storageServer.startServer();
 
     // DiskStorageTests::runAll();

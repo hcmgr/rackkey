@@ -15,6 +15,7 @@
 #include "config.hpp"
 #include "block.hpp"
 #include "test_utils.hpp"
+#include "master_config.hpp"
 
 using namespace web;
 using namespace web::http;
@@ -87,7 +88,7 @@ public:
     /**
      * Stores configuration of our service (e.g. storage node IPs)
      */
-    Config config;
+    MasterConfig config;
 
     /* Default constructor */
     MasterServer(std::string configFilePath) 
@@ -106,10 +107,6 @@ public:
     /**
      * Calculates and displays the distribution of the given `key`s blocks
      * across the storage nodes.
-     * 
-     * TODO: 
-     * 
-     * re-factor for replication
      */
     void calculateAndShowBlockDistribution(std::string key) 
     {
@@ -124,16 +121,12 @@ public:
             uint32_t blockNum = p.first; 
             std::vector<uint32_t> nodeIds = p.second;
 
-            std::cout << blockNum << std::endl;
-
             for (auto nodeId : nodeIds)
             {
                 if (nodeBlockCounts.find(nodeId) == nodeBlockCounts.end())
                     nodeBlockCounts[nodeId] = 0;
                 nodeBlockCounts[nodeId]++;
                 totalNumReplicatedBlocks++;
-
-                std::cout << nodeId << std::endl;
             }
         }
 
@@ -141,6 +134,43 @@ public:
         std::cout << "Total num. blocks (including replicas): " << totalNumReplicatedBlocks << std::endl;
         std::cout << "Distribution:" << std::endl;
         PrintUtils::printMap(nodeBlockCounts);
+    }
+
+    std::string kbnToString() 
+    {
+        std::ostringstream oss;
+
+        for (const auto& keyEntry : keyBlockNodeListMap) 
+        {
+            const std::string& key = keyEntry.first;
+            const auto& blockMapPtr = keyEntry.second;
+
+            oss << "Key: " << key << "\n";
+
+            if (blockMapPtr) 
+            {
+                for (const auto& blockEntry : *blockMapPtr) 
+                {
+                    uint32_t blockNum = blockEntry.first;
+                    const std::vector<uint32_t>& storageNodeIds = blockEntry.second;
+
+                    oss << "  Block " << blockNum << ": [";
+
+                    for (size_t i = 0; i < storageNodeIds.size(); ++i) 
+                    {
+                        oss << storageNodeIds[i];
+                        if (i != storageNodeIds.size() - 1) {
+                            oss << ", ";
+                        }
+                    }
+
+                    oss << "]\n";
+                }
+            } else {
+                oss << "  (No block mappings)\n";
+            }
+        }
+        return oss.str();
     }
 
     /**
@@ -234,7 +264,9 @@ public:
         uint32_t storageNodeId,
         std::string key,
         std::vector<uint32_t> blockNums,
-        std::shared_ptr<std::map<uint32_t, Block>> blockMap
+        std::shared_ptr<std::map<uint32_t, Block>> blockMap,
+        std::mutex& blockMapMutex,
+        std::shared_ptr<std::vector<unsigned char>> responsePayload
     )
     {
         std::shared_ptr<StorageNode> sn = this->storageNodes[storageNodeId];
@@ -260,8 +292,6 @@ public:
         req.set_request_uri(U("/store/" + key));
         req.set_body(requestPayload);
 
-        auto responsePayload = std::make_shared<std::vector<unsigned char>>();
-
         return client->request(req)
         .then([=](http_response response)
         {
@@ -274,11 +304,13 @@ public:
         })
 
         // deserialise payload and populate block map
-        .then([=](std::vector<unsigned char> payload)
+        .then([=, &blockMapMutex](std::vector<unsigned char> payload)
         {
             *responsePayload = payload;
             std::vector<Block> blocks = Block::deserialize(*(responsePayload));
-            for (auto block : blocks)
+
+            std::lock_guard<std::mutex> lock(blockMapMutex);
+            for (auto &block : blocks)
             {
                 blockMap->insert({block.blockNum, std::move(block)});
             }
@@ -340,7 +372,10 @@ public:
 
         // mapping of the form: {block num. -> block object}
         auto blockMap = std::make_shared<std::map<uint32_t, Block>>();
-        
+        std::mutex blockMapMutex;
+
+        std::vector<std::shared_ptr<std::vector<unsigned char>>> responsePayloads;
+
         /**
          * Call `getBlocks` for each node and wait on all tasks 
          * to finish.
@@ -351,7 +386,10 @@ public:
             uint32_t nodeId = p.first;
             std::vector<uint32_t> blockNums = p.second;
 
-            auto task = getBlocks(nodeId, key, blockNums, blockMap);
+            auto responsePayload = std::make_shared<std::vector<unsigned char>>();
+            responsePayloads.push_back(responsePayload);
+
+            auto task = getBlocks(nodeId, key, blockNums, blockMap, blockMapMutex, responsePayload);
             getBlockTasks.push_back(task);
         }
 
@@ -384,7 +422,7 @@ public:
             Block block = p.second;
             payloadBuffer.insert(payloadBuffer.end(), block.dataStart, block.dataEnd);
         }
-
+         
         std::cout << "GET: successful" << std::endl;
 
         // success response
@@ -404,7 +442,8 @@ public:
         uint32_t storageNodeId,
         std::string key,
         std::vector<Block> &blocks,
-        std::shared_ptr<std::map<uint32_t, std::vector<uint32_t>>> blockNodeMap
+        std::shared_ptr<std::map<uint32_t, std::vector<uint32_t>>> blockNodeMap,
+        std::mutex& blockNodeMapMutex
     )
     {
         std::shared_ptr<StorageNode> sn = this->storageNodes[storageNodeId];
@@ -436,8 +475,9 @@ public:
             })
 
             // assign blocks to their nodes
-            .then([=]()
+            .then([=, &blockNodeMapMutex]()
             {
+                std::lock_guard<std::mutex> lock(blockNodeMapMutex);
                 for (auto &block : blocks)
                 {
                     (*blockNodeMap)[block.blockNum].push_back(storageNodeId);
@@ -461,7 +501,8 @@ public:
         auto start = std::chrono::high_resolution_clock::now();
             
         auto blockNodeMap = std::make_shared<std::map<uint32_t, std::vector<uint32_t>>>();
-        auto payloadPtr = std::make_shared<std::vector<unsigned char>>();
+        std::mutex blockNodeMapMutex;
+        auto requestPayload = std::make_shared<std::vector<unsigned char>>();
 
         std::vector<pplx::task<void>> sendBlockTasks;
         bool success = true;
@@ -471,28 +512,28 @@ public:
         // divide into blocks
         .then([&](std::vector<unsigned char> payload)
         {
-            *payloadPtr = std::move(payload);
+            *requestPayload = std::move(payload);
                   
-            uint32_t payloadSize = payloadPtr->size();
+            uint32_t payloadSize = requestPayload->size();
             uint32_t blockCnt = 0;
 
-            std::map<uint32_t, std::vector<Block>> nodeBlockMap;
+            std::map<uint32_t, std::vector<Block>> nodeBlockMap; // {node id -> block list}
 
-            for (uint32_t i = 0; i < payloadSize; i += config.diskBlockSize) 
+            for (uint32_t i = 0; i < payloadSize; i += config.dataBlockSize) 
             {
                 // construct the block
                 uint32_t blockNum = blockCnt++;
-                auto blockStart = payloadPtr->begin() + i;
-                auto blockEnd = payloadPtr->begin() + std::min(i + config.diskBlockSize, payloadSize);
+                auto blockStart = requestPayload->begin() + i;
+                auto blockEnd = requestPayload->begin() + std::min(i + config.dataBlockSize, payloadSize);
                 auto dataSize = blockEnd - blockStart;
 
                 Block block(key, blockNum, dataSize, blockStart, blockEnd);
 
-                uint32_t R = this->config.replicationFactor; // replication factor
+                uint32_t R = std::min(this->config.replicationFactor, this->config.numStorageNodes); // replication factor
 
                 /**
-                 * Find next R distinct physical nodes and add the block to the
-                 * nodes' block list (where R is our replication factor).
+                 * Find next R distinct physical nodes and add the block to
+                 * each nodes' block list (where R is our replication factor).
                  */
                 std::string hashInput = key + std::to_string(blockNum);
                 uint32_t hash = Crypto::sha256_32(hashInput);
@@ -503,8 +544,10 @@ public:
                 {
                     std::shared_ptr<VirtualNode> vn = this->hashRing.findNextNode(hash);
 
-                    // make sure we don't assign to the same physical node twice
-                    if (assignedPhysicalNodes.find(vn->physicalNodeId) == assignedPhysicalNodes.end())
+                    if (
+                        this->nodeHealthMap[vn->physicalNodeId] || // node is healthy
+                        assignedPhysicalNodes.find(vn->physicalNodeId) == assignedPhysicalNodes.end() // haven't used node yet
+                    )
                     {
                         nodeBlockMap[vn->physicalNodeId].push_back(block);
                         assignedPhysicalNodes.insert(vn->physicalNodeId);
@@ -528,7 +571,7 @@ public:
                 uint32_t storageNodeId = p.first;
                 std::vector<Block> blocks = p.second;
 
-                auto task = sendBlocks(storageNodeId, key, blocks, blockNodeMap);
+                auto task = sendBlocks(storageNodeId, key, blocks, blockNodeMap, blockNodeMapMutex);
                 sendBlockTasks.push_back(task);
             }
 
@@ -798,7 +841,7 @@ namespace MasterServerTests {
 
 void run()
 {    
-    std::string configFilePath = "../config.json";
+    std::string configFilePath = "../src/config.json";
     MasterServer masterServer = MasterServer(configFilePath);
     masterServer.startServer();
 
@@ -813,26 +856,25 @@ int main()
 
 /*
 TODO:
-    - fix 1 < R < N replication factor
-    - test replication in disk_storage tests
-    - replication
-        - first, need to send block numbers on GET (and maybe DELETE)
-            - each storage node will store more than any GET requires of it,
-              return only those required of it
-    - way to run all tests with one command
-    - adding / removing nodes 
+    - actually test replication
+    - persistence on the storage nodes
+        - i.e. each makes a directory on the host OS
     - master restarting
         - i.e. if it goes down, it needs to re-build its view of the world
+        - probs need to persist its critical data
+            - can probs allow us to review what's going on in master
+    - adding / removing nodes 
+    - way to run all tests with one command
     - understand and internalise CAP
     - implement concurrent r/w protections for DiskStorage
         - see bottom of server.cpp for plan
     - make .then() code non-blocking (related to concurrent r/w)
-
-    - group together and separate out handlers into nice abstraction
-    - make a dedicated 'docker' directory for storage/
-    - authenticate requests from master -> server
+    - abstract each endpoint in its own class, nested class, or something that makes sense
+    - authenticate requests from client -> master (and maybe from master -> server)
         - token or generated API key
     - sort out documentation
+    - get more info from master node:
+        - storage node breakdown (size, num. blocks, etc.)
     - potentially:
         - return JSON
         - reason:
@@ -840,6 +882,9 @@ TODO:
             - in that case, MasterServer could return JSON, and our client process
               that JSON.
             - for now, CURL is great, its just something to think about
+
+TOLEARN:
+    - CAP (properly)
 
 WITH REPLICATION PLAN:
     GET:
