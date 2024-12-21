@@ -125,23 +125,32 @@ public:
             uint32_t blockNum = p.first; 
             std::vector<uint32_t> nodeIds = p.second;
 
-            std::cout << blockNum << std::endl;
-
             for (auto nodeId : nodeIds)
             {
                 if (nodeBlockCounts.find(nodeId) == nodeBlockCounts.end())
                     nodeBlockCounts[nodeId] = 0;
                 nodeBlockCounts[nodeId]++;
                 totalNumReplicatedBlocks++;
-
-                std::cout << nodeId << std::endl;
             }
         }
 
-        std::cout << "Num. unique blocks: " << totalNumBlocks << std::endl;
-        std::cout << "Total num. blocks (including replicas): " << totalNumReplicatedBlocks << std::endl;
-        std::cout << "Distribution:" << std::endl;
-        PrintUtils::printMap(nodeBlockCounts);
+        std::ostringstream oss;
+
+        oss << "\n";
+        oss << "-------------------\n";
+        oss << "key: " << key << "\n";
+        oss << "unique blocks: " << totalNumBlocks << "\n";
+        oss << "total blocks (including replicas): " << totalNumReplicatedBlocks << "\n";
+        oss << "block distribution:\n";
+        oss << "{\n";
+        for (const auto& [nodeId, blockCount] : nodeBlockCounts) {
+            oss << "  " << nodeId << ": " << blockCount << "\n";
+        }
+        oss << "}\n";
+        oss << "-------------------\n";
+        oss << "\n";
+
+        std::cout << oss.str();
     }
 
     /**
@@ -494,7 +503,8 @@ public:
 
                 Block block(key, blockNum, dataSize, blockStart, blockEnd);
 
-                uint32_t R = this->config.replicationFactor; // replication factor
+                // replication factor
+                uint32_t R = std::min(this->config.replicationFactor, this->config.numStorageNodes);
 
                 /**
                  * Find next R distinct physical nodes and add the block to the
@@ -819,33 +829,36 @@ int main()
 
 /*
 TODO:
-    - fix 1 < R < N replication factor
-    - test replication in disk_storage tests
-    - replication
-        - first, need to send block numbers on GET (and maybe DELETE)
-            - each storage node will store more than any GET requires of it,
-              return only those required of it
-    - way to run all tests with one command
+    - fix hard coded dataBlockSize problem
+    - /stats endpoint that reports 
+      num blocks stored / bytes used / max size / free
+      for each storage node
+        - really want to make sure the files aren't just growing
+        - just stress test it with a bunch of crap and see if it grows / buckles
+    - investigate distribution of key's blocks 
+        - particularly want to ensure that block numbers
+          are themselves evenly distributed
+        - i.e. may be even, but:
+            - say we have 3 nodes and r = 3
+            - don't want all 3 of block0 on node0, all 3 of block1 on node1 etc
+            - pretty sure this isn't the case, but want  to make sure
+    - do up some nice docs / readme stuff
+        - will give a chance to re-understand how everything is done
+    - have a general clean / optimise
+
     - adding / removing nodes 
     - master restarting
-        - i.e. if it goes down, it needs to re-build its view of the world
+        - i.e. minimal master persistence to rebuild from shutdown / reboot
     - understand and internalise CAP
     - implement concurrent r/w protections for DiskStorage
         - see bottom of server.cpp for plan
     - make .then() code non-blocking (related to concurrent r/w)
-
     - group together and separate out handlers into nice abstraction
     - make a dedicated 'docker' directory for storage/
+    - way to run all tests with one command
     - authenticate requests from master -> server
         - token or generated API key
     - sort out documentation
-    - potentially:
-        - return JSON
-        - reason:
-            - if CURL is too clunky, might want to write our own lightweight client
-            - in that case, MasterServer could return JSON, and our client process
-              that JSON.
-            - for now, CURL is great, its just something to think about
 
 WITH REPLICATION PLAN:
     GET:
