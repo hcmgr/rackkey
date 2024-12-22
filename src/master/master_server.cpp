@@ -238,7 +238,11 @@ public:
     }
 
     /**
-     * Retreives all blocks from given storage node
+     * Retreives blocks `blockNums` for `key` from node `storageNodeId`.
+     * 
+     * NOTE:
+     * 
+     * blockMap is populated by this function (see getHandler() below).
      */
     pplx::task<void> getBlocks(
         uint32_t storageNodeId,
@@ -297,15 +301,10 @@ public:
     }
 
     /**
-     * GET
+     * /store/{KEY}: GET
      * ---
-     * Given: (KEY)
-     * Requests all blocks for the given KEY from the storage cluster, returns in order
-     * 
-     * NOTE: TODO:
-     * 
-     * At the moment, we don't send block numbers to get.
-     * Will likely needs this in the future
+     * Requests all of {KEY}'s blocks from the storage cluster
+     * and returns them in order.
      */
     void getHandler(http_request request, const std::string key) 
     {
@@ -410,10 +409,12 @@ public:
     }
 
     /**
-     * Sends the given list of blocks to the given storage node.
+     * Sends the given list of blocks `blocks` for `key` to storage
+     * node `storageNodeId`.
      * 
-     * All blocks are sent in a single PUT request to the given 
-     * storage node.
+     * NOTE:
+     * 
+     * `blockNodeMap` is populated in this function (see putHandler() below).
      */
     pplx::task<void> sendBlocks(
         uint32_t storageNodeId,
@@ -463,10 +464,10 @@ public:
     }
 
     /**
-     * PUT
+     * /store/{KEY}: PUT
      * ---
-     * Given: (KEY, payload)
-     * Breaks payload into blocks and distributes them across the storage cluster.
+     * Given {KEY} and a data payload, breaks payload into blocks and 
+     * distributes them across the storage cluster.
      */
     void putHandler(http_request request, const std::string key) 
     {
@@ -474,8 +475,15 @@ public:
 
         // Timing point: start
         auto start = std::chrono::high_resolution_clock::now();
-            
+
+
+        /**
+         * blockNodeMap maps each block num. to a list of nodes that store it.
+         * 
+         * i.e. {block num -> [nodeA, nodeB, ...]}
+         */
         auto blockNodeMap = std::make_shared<std::map<uint32_t, std::vector<uint32_t>>>();
+
         auto requestPayload = std::make_shared<std::vector<unsigned char>>();
 
         std::vector<pplx::task<void>> sendBlockTasks;
@@ -483,7 +491,7 @@ public:
 
         pplx::task<void> task = request.extract_vector()
 
-        // divide into blocks
+        // divide payload into blocks
         .then([&](std::vector<unsigned char> payload)
         {
             *requestPayload = std::move(payload);
@@ -512,18 +520,21 @@ public:
                  */
                 std::string hashInput = key + std::to_string(blockNum);
                 uint32_t hash = Crypto::sha256_32(hashInput);
-                std::unordered_set<uint32_t> assignedPhysicalNodes;
+                std::unordered_set<uint32_t> usedPhysicalNodes;
                 int cnt = 0;
 
                 while (cnt < R)
                 {
                     std::shared_ptr<VirtualNode> vn = this->hashRing.findNextNode(hash);
+                    uint32_t nodeId = vn->physicalNodeId;
 
-                    // make sure we don't assign to the same physical node twice
-                    if (assignedPhysicalNodes.find(vn->physicalNodeId) == assignedPhysicalNodes.end())
+                    if (
+                        usedPhysicalNodes.find(nodeId) == usedPhysicalNodes.end() &&    // node is un-used by block
+                        this->nodeHealthMap[nodeId]     // node is healthy
+                       )
                     {
-                        nodeBlockMap[vn->physicalNodeId].push_back(block);
-                        assignedPhysicalNodes.insert(vn->physicalNodeId);
+                        nodeBlockMap[nodeId].push_back(block);
+                        usedPhysicalNodes.insert(nodeId);
                         cnt++;
                     }
 
@@ -587,7 +598,7 @@ public:
     }
 
     /**
-     * Deletes all blocks correpsonding to key `key` from node with id `storageNodeId`.
+     * Deletes all blocks correpsonding to `key` from node `storageNodeId`.
      */
     pplx::task<void> deleteBlocks(uint32_t storageNodeId, std::string key)
     {
@@ -614,10 +625,10 @@ public:
     }
 
     /**
-     * DELETE
+     * /store/{KEY}:DEL
      * ---
-     * Given: (KEY)
-     * Deletes all blocks of the given KEY from the storage cluster
+     * Given {KEY}, deletes all blocks of {KEY} from the 
+     * storage cluster.
      * 
      * NOTE: TODO:
      * 
@@ -687,9 +698,9 @@ public:
     }
 
     /**
-     * GET
+     * /keys:GET
      * ---
-     * Returns newline-separated list of all keys.
+     * Returns newline-separated list of all keys currently stored.
      */
     void getKeysHandler(http_request request) 
     {
@@ -699,6 +710,23 @@ public:
         for (const auto &p : keyBlockNodeListMap)
             oss << p.first << "\n";
         
+        request.reply(status_codes::OK, oss.str());
+    }
+
+    /**
+     * /stats:GET
+     * ---
+     * Returns storage node statistics 
+     * i.e. #blocks, #keys, space used, space free, total size, etc.
+     * 
+     * TODO:
+     */
+    void getStatsHandler(http_request request)
+    {
+        std::cout << "GET /stats req received" << std::endl;
+        std::ostringstream oss;
+        oss << config.numStorageNodes << "\n";
+
         request.reply(status_codes::OK, oss.str());
     }
 
@@ -720,6 +748,11 @@ public:
         {
             if (request.method() == methods::GET)
                 this->getKeysHandler(request);
+        }
+        else if (endpoint == U("/stats") && param == U(""))
+        {
+            if (request.method() == methods::GET)
+                this->getStatsHandler(request);
         }
         else 
         {
@@ -829,15 +862,17 @@ int main()
 
 /*
 TODO:
-    - fix hard coded dataBlockSize problem
-    - make docker directory
+    - actual persistence
+    - do up some nice docs / readme stuff
+        - give a chance to re-understand how all works
     - /stats endpoint that reports 
       num blocks stored / bytes used / max size / free
       for each storage node
         - really want to make sure the files aren't just growing
         - just stress test it with a bunch of crap and see if it grows / buckles
-    - do up some nice docs / readme stuff
-        - will give a chance to re-understand how everything is done
+    - separate out each endpoint and their handlers into nice abstraction:
+        - nested class, etc.
+    - make docker directory
     - investigate distribution of key's blocks 
         - particularly want to ensure that block numbers
           are themselves evenly distributed
@@ -846,9 +881,7 @@ TODO:
             - don't want all 3 of block0 on node0, all 3 of block1 on node1 etc
             - pretty sure this isn't the case, but want  to make sure
     
-    - have a general clean / optimise
-
-    - adding / removing nodes 
+    - adding / removing nodes / rebalancing
     - master restarting
         - i.e. minimal master persistence to rebuild from shutdown / reboot
     - understand and internalise CAP
@@ -857,8 +890,6 @@ TODO:
     - make .then() code non-blocking (related to concurrent r/w)
 
     potentially:
-        - group together and separate out handlers into nice abstraction
-        - make a dedicated 'docker' directory for storage/
         - way to run all tests with one command
         - authenticate requests from master -> server
             - token or generated API key
