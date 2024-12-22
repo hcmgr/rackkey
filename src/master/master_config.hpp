@@ -29,12 +29,12 @@ public:
     uint32_t numVirtualNodes;
 
     /**
-     * Size of data (in bytes) each Block object stores
-     */
-    uint32_t dataBlockSize;
-
-    /**
      * Number of storage nodes we write each block to
      */
     uint32_t replicationFactor;
+
+    /**
+     * Size of data (in bytes) each Block object stores
+     */
+    uint32_t dataBlockSize;
 };

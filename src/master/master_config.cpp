@@ -11,6 +11,9 @@ MasterConfig::MasterConfig(std::string configFilePath)
 
 void MasterConfig::loadVariables()
 {
+    /**
+     * master-server-specific config
+     */
     json::value masterServer = this->jsonConfig.at(U("masterServer"));
 
     this->masterServerIPPort = masterServer.at(U("masterServerIPPort")).as_string();
@@ -25,7 +28,11 @@ void MasterConfig::loadVariables()
 
     this->numVirtualNodes = masterServer.at(U("numVirtualNodes")).as_integer();
 
-    this->dataBlockSize = masterServer.at(U("dataBlockSize")).as_integer();
-
     this->replicationFactor = masterServer.at(U("replicationFactor")).as_integer();
+
+    /**
+     * shared config
+     */
+    json::value shared = this->jsonConfig.at("shared");
+    this->dataBlockSize = shared.at(U("dataBlockSize")).as_integer();
 }

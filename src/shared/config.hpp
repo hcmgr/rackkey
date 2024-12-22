@@ -37,10 +37,7 @@ public:
      * in their respective constructors.
      */
     virtual void loadVariables() = 0;
-    virtual ~Config() = default;
 
-    /**
-     * Param constructor
-     */
     Config(std::string configFilePath);
+    virtual ~Config() = default;
 };

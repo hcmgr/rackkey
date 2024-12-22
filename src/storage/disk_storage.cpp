@@ -68,8 +68,8 @@ std::string Header::toString() {
 
 BATEntry::BATEntry()
     : keyHash(0),
-        startingDiskBlockNum(0),
-        numBytes(0)
+      startingDiskBlockNum(0),
+      numBytes(0)
 {
 }
 
@@ -78,8 +78,8 @@ BATEntry::BATEntry(uint32_t keyHash,
     uint32_t numBytes
 )
     : keyHash(keyHash),
-        startingDiskBlockNum(startingDiskBlockNum),
-        numBytes(numBytes)
+      startingDiskBlockNum(startingDiskBlockNum),
+      numBytes(numBytes)
 {
 }
 

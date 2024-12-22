@@ -476,7 +476,7 @@ public:
         auto start = std::chrono::high_resolution_clock::now();
             
         auto blockNodeMap = std::make_shared<std::map<uint32_t, std::vector<uint32_t>>>();
-        auto payloadPtr = std::make_shared<std::vector<unsigned char>>();
+        auto requestPayload = std::make_shared<std::vector<unsigned char>>();
 
         std::vector<pplx::task<void>> sendBlockTasks;
         bool success = true;
@@ -486,19 +486,19 @@ public:
         // divide into blocks
         .then([&](std::vector<unsigned char> payload)
         {
-            *payloadPtr = std::move(payload);
+            *requestPayload = std::move(payload);
                   
-            uint32_t payloadSize = payloadPtr->size();
+            uint32_t payloadSize = requestPayload->size();
             uint32_t blockCnt = 0;
 
             std::map<uint32_t, std::vector<Block>> nodeBlockMap;
 
-            for (uint32_t i = 0; i < payloadSize; i += 4096) 
+            for (uint32_t i = 0; i < payloadSize; i += config.dataBlockSize) 
             {
                 // construct the block
                 uint32_t blockNum = blockCnt++;
-                auto blockStart = payloadPtr->begin() + i;
-                auto blockEnd = payloadPtr->begin() + std::min(i + 4096, payloadSize);
+                auto blockStart = requestPayload->begin() + i;
+                auto blockEnd = requestPayload->begin() + std::min(i + config.dataBlockSize, payloadSize);
                 auto dataSize = blockEnd - blockStart;
 
                 Block block(key, blockNum, dataSize, blockStart, blockEnd);
@@ -830,11 +830,14 @@ int main()
 /*
 TODO:
     - fix hard coded dataBlockSize problem
+    - make docker directory
     - /stats endpoint that reports 
       num blocks stored / bytes used / max size / free
       for each storage node
         - really want to make sure the files aren't just growing
         - just stress test it with a bunch of crap and see if it grows / buckles
+    - do up some nice docs / readme stuff
+        - will give a chance to re-understand how everything is done
     - investigate distribution of key's blocks 
         - particularly want to ensure that block numbers
           are themselves evenly distributed
@@ -842,8 +845,7 @@ TODO:
             - say we have 3 nodes and r = 3
             - don't want all 3 of block0 on node0, all 3 of block1 on node1 etc
             - pretty sure this isn't the case, but want  to make sure
-    - do up some nice docs / readme stuff
-        - will give a chance to re-understand how everything is done
+    
     - have a general clean / optimise
 
     - adding / removing nodes 

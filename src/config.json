@@ -17,5 +17,9 @@
     "storageServer": {
         "diskBlockSize": 4096,
         "maxDataSizePower": 30
+    },
+
+    "shared": {
+        "dataBlockSize": 4096
     }
 }

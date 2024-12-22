@@ -7,6 +7,7 @@ public:
     StorageConfig(std::string configFilePath);
     void loadVariables() override;
 
+    uint32_t dataBlockSize;
     uint32_t diskBlockSize;
     uint32_t maxDataSizePower;
 };

@@ -49,7 +49,6 @@ public:
 
         std::vector<unsigned char> readBuffer;
         std::vector<Block> blocks;
-        uint32_t dataBlockSize = 4096;
 
         /**
          * Get block numbers from request payload
@@ -77,7 +76,7 @@ public:
          */
         try 
         {
-            blocks = diskStorage.readBlocks(key, blockNums, dataBlockSize, readBuffer);
+            blocks = diskStorage.readBlocks(key, blockNums, config.dataBlockSize, readBuffer);
         }
         catch (std::runtime_error &e)
         {
