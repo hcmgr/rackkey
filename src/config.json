@@ -13,7 +13,7 @@
     },
 
     "storageServer": {
-        "storeDirPath": "rackkey",
+        "storeDirPath": "/rackkey",
         "storeFilePrefix": "store",
         "diskBlockSize": 4096,
         "maxDataSizePower": 30,
