@@ -62,17 +62,17 @@ public:
     HashRing();
 
     /**
-     * Adds the given VirtualNode to the ring.
+     * Adds the given virtual node to the ring.
      */
     void addNode(std::shared_ptr<VirtualNode> virtualNode);
 
     /**
-     * Removes the given VirtualNode from the ring.
+     * Removes the given virtual node from the ring.
      */
     void removeNode(std::shared_ptr<VirtualNode> virtualNode);
 
     /**
-     * Return the number of VirtualNode's on the ring.
+     * Return the number of virtual nodes on the ring.
      */
     int getNodeCount();
 

@@ -42,12 +42,7 @@ HashRing::HashRing()
     : ring() {}
 
 /**
- * Adds a physical node to the ring.
- * 
- * In effect, this means adding all the physical node's
- * virtual nodes to the ring.
- * 
- * NOTE: this triggers a re-assignment.
+ * Adds the given virtual to the ring.
  */
 void HashRing::addNode(std::shared_ptr<VirtualNode> virtualNode) 
 {
@@ -56,7 +51,7 @@ void HashRing::addNode(std::shared_ptr<VirtualNode> virtualNode)
 }
 
 /**
- * Removes a physical node from the ring.
+ * Removes the given virtual node from the ring.
  */
 void HashRing::removeNode(std::shared_ptr<VirtualNode> virtualNode) 
 {
@@ -65,7 +60,7 @@ void HashRing::removeNode(std::shared_ptr<VirtualNode> virtualNode)
 }
 
 /**
- * Return the number of VirtualNode's on the ring.
+ * Return the number of virtual nodes on the ring.
  */
 int HashRing::getNodeCount()
 {

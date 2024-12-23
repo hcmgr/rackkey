@@ -15,35 +15,35 @@ services:
     volumes:
       - ~/rackkey:/rackkey
 
-  # storage-node-1:
-  #   image: storage-server
-  #   build:
-  #     context: ../    # /src directory
-  #     dockerfile: storage/Dockerfile 
-  #   ports:
-  #     - "8082:8080" 
-  #   environment:
-  #     - PORT=8080
-  #     - NODE_ID=1
-  #   restart: always
-  #   container_name: Node_1
-  #   volumes:
-  #     - ~/rackkey:/rackkey
+  storage-node-1:
+    image: storage-server
+    build:
+      context: ../    # /src directory
+      dockerfile: storage/Dockerfile 
+    ports:
+      - "8082:8080" 
+    environment:
+      - PORT=8080
+      - NODE_ID=1
+    restart: always
+    container_name: Node_1
+    volumes:
+      - ~/rackkey:/rackkey
 
-  # storage-node-2:
-  #   image: storage-server
-  #   build:
-  #     context: ../    # /src directory
-  #     dockerfile: storage/Dockerfile
-  #   ports:
-  #     - "8083:8080"  
-  #   environment:
-  #     - PORT=8080
-  #     - NODE_ID=2
-  #   restart: always
-  #   container_name: Node_2
-  #   volumes:
-  #     - ~/rackkey:/rackkey
+  storage-node-2:
+    image: storage-server
+    build:
+      context: ../    # /src directory
+      dockerfile: storage/Dockerfile
+    ports:
+      - "8083:8080"  
+    environment:
+      - PORT=8080
+      - NODE_ID=2
+    restart: always
+    container_name: Node_2
+    volumes:
+      - ~/rackkey:/rackkey
 
   # storage-node-3:
   #   image: storage-server

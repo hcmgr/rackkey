@@ -32,9 +32,9 @@ public:
      * 
      * NOTE:
      * 
-     * As derived classes of Config, MasterConfig and StorageConfig 
-     * implement their own loadVariables() functions that are called
-     * in their respective constructors.
+     * Derived classes MasterConfig and StorageConfig implement 
+     * their own loadVariables() functions that are called in 
+     * their respective constructors.
      */
     virtual void loadVariables() = 0;
 

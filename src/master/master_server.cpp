@@ -24,27 +24,6 @@ using namespace web::http::experimental::listener;
 
 class MasterServer 
 {
-private:
-
-    /**
-     * Add our pre-defined storage nodes and add their virtual nodes
-     * to the hash ring.
-     */
-    void addInitialStorageNodes() {
-        for (std::string ipPort : this->config.storageNodeIPs) 
-        {
-            auto storageNode = std::make_shared<StorageNode>(ipPort, this->config.numVirtualNodes);
-            this->storageNodes[storageNode->id] = storageNode;
-
-            // add all virtual nodes to the hash ring
-            for (auto &vn : storageNode->virtualNodes)
-                hashRing.addNode(vn);
-            
-            // node must prove beyond reasonable doubt its healthy
-            this->nodeHealthMap[storageNode->id] = false;
-        }
-    }
-
 public:
     /**
      * HashRing used to distribute our blocks evenly across nodes
@@ -58,7 +37,9 @@ public:
      * 
      * Allows for fast lookup of block location.
      * 
-     * NOTE: nicknamed the 'KBN' for brevity
+     * NOTE: 
+     * 
+     * Nicknamed the 'KBN' for brevity.
      */
     std::map<std::string, std::shared_ptr<std::map<uint32_t, std::vector<uint32_t>>>> keyBlockNodeListMap;
 
@@ -85,9 +66,6 @@ public:
     std::map<uint32_t, bool> nodeHealthMap;
     std::mutex nodeHealthMapMutex;
 
-    /**
-     * Stores configuration of our service (e.g. storage node IPs)
-     */
     MasterConfig config;
 
     /* Default constructor */
@@ -107,10 +85,6 @@ public:
     /**
      * Calculates and displays the distribution of the given `key`s blocks
      * across the storage nodes.
-     * 
-     * TODO: 
-     * 
-     * re-factor for replication
      */
     void calculateAndShowBlockDistribution(std::string key) 
     {
@@ -154,14 +128,38 @@ public:
     }
 
     /**
+     * Add our pre-defined storage nodes and add their virtual nodes
+     * to the hash ring.
+     */
+    void addInitialStorageNodes() {
+        for (std::string ipPort : this->config.storageNodeIPs) 
+        {
+            auto storageNode = std::make_shared<StorageNode>(ipPort, this->config.numVirtualNodes);
+            this->storageNodes[storageNode->id] = storageNode;
+
+            // add all virtual nodes to the hash ring
+            for (auto &vn : storageNode->virtualNodes)
+                hashRing.addNode(vn);
+            
+            // node must prove beyond reasonable doubt its healthy
+            this->nodeHealthMap[storageNode->id] = false;
+        }
+    }
+
+    /**
      * Thread function used to periodically check health of all storage nodes.
      * 
-     * `period` - time to wait in between checks (milliseconds)
+     * NOTE:
+     * 
+     * Time between health checks (i.e. the period) is given by config.healthCheckPeriodMs 
+     * (i.e. masterServer.healthCheckPeriodMs in config.json).
      */
     void checkNodeHealth()
     {
         while (1) 
         {
+            uint32_t period = this->config.healthCheckPeriodMs;
+
             /**
              * Every `period` milliseconds, send a GET to the /health/ endpoint
              * of each storage node.
@@ -170,7 +168,7 @@ public:
              */
 
             std::this_thread::sleep_for(
-                std::chrono::milliseconds(this->config.healthCheckPeriodMs)
+                std::chrono::milliseconds(period)
             );
 
             std::vector<pplx::task<void>> healthCheckTasks;
@@ -237,11 +235,11 @@ public:
     }
 
     /**
-     * Retreives blocks `blockNums` for `key` from node `storageNodeId`.
+     * Retreives blocks `blockNums` for key `key` from node `storageNodeId`.
      * 
      * NOTE:
      * 
-     * blockMap is populated by this function (see getHandler() below).
+     * `blockMap` is populated by this function (see getHandler() below).
      */
     pplx::task<void> getBlocks(
         uint32_t storageNodeId,
@@ -268,13 +266,11 @@ public:
             );
         }
 
-        // build request and send request
+        // build and send request
         http_request req = http_request();
         req.set_method(methods::GET);
         req.set_request_uri(U("/store/" + key));
         req.set_body(requestPayload);
-
-        // auto responsePayload = std::make_shared<std::vector<unsigned char>>();
 
         return client->request(req)
         .then([=](http_response response)
@@ -349,6 +345,7 @@ public:
 
         // mapping of the form: {block num. -> block object}
         auto blockMap = std::make_shared<std::map<uint32_t, Block>>();
+
         std::vector<std::shared_ptr<std::vector<unsigned char>>> responsePayloads;
         
         /**
@@ -390,7 +387,7 @@ public:
         if (!success)
             return;
 
-        // recombine
+        // recombine blocks in order
         std::vector<unsigned char> payloadBuffer;
         for (auto p : *(blockMap))
         {
@@ -400,7 +397,7 @@ public:
 
         std::cout << "GET: successful" << std::endl;
 
-        // success response
+        // send success response
         http_response response(status_codes::OK);
         response.set_body(payloadBuffer);
         request.reply(response);
@@ -408,7 +405,7 @@ public:
     }
 
     /**
-     * Sends the given list of blocks `blocks` for `key` to storage
+     * Sends the given list of blocks `blocks` for key `key` to storage
      * node `storageNodeId`.
      * 
      * NOTE:
@@ -433,14 +430,13 @@ public:
             block.serialize(payloadBuffer);
         }
 
-        // build request
+        // build and send request
         http_request req = http_request();
         req.set_method(methods::PUT);
         req.set_request_uri(U("/store/" + key));
         req.set_body(payloadBuffer);
 
         pplx::task<void> task = client->request(req)
-            // send request
             .then([=](http_response response) 
             {
                 if (response.status_code() != status_codes::OK) 
@@ -450,7 +446,7 @@ public:
                 }
             })
 
-            // assign blocks to their nodes
+            // assign blocks to node `storageNodeId`
             .then([=]()
             {
                 for (auto &block : blocks)
@@ -475,7 +471,6 @@ public:
         // Timing point: start
         auto start = std::chrono::high_resolution_clock::now();
 
-
         /**
          * blockNodeMap maps each block num. to a list of nodes that store it.
          * 
@@ -488,9 +483,11 @@ public:
         std::vector<pplx::task<void>> sendBlockTasks;
         bool success = true;
 
+        /**
+         * Break up payload data into blocks and assign each block 
+         * to R storage nodes, where R is our replication factor.
+         */
         pplx::task<void> task = request.extract_vector()
-
-        // divide payload into blocks
         .then([&](std::vector<unsigned char> payload)
         {
             *requestPayload = std::move(payload);
@@ -514,8 +511,8 @@ public:
                 uint32_t R = std::min(this->config.replicationFactor, this->config.numStorageNodes);
 
                 /**
-                 * Find next R distinct physical nodes and add the block to the
-                 * nodes' block list (where R is our replication factor).
+                 * Find next R (replication factor) distinct physical nodes and 
+                 * add the block to the nodes' block list.
                  */
                 std::string hashInput = key + std::to_string(blockNum);
                 uint32_t hash = Crypto::sha256_32(hashInput);
@@ -544,7 +541,9 @@ public:
             return nodeBlockMap;
         })
 
-        // send each storage node its block list
+        /**
+         * Send each storage node its block list
+         */
         .then([&](std::unordered_map<uint32_t, std::vector<Block>> nodeBlockMap)
         {
             auto sendStart = std::chrono::high_resolution_clock::now();
@@ -558,7 +557,7 @@ public:
                 sendBlockTasks.push_back(task);
             }
 
-            // wait for 'send' tasks
+            // wait for all `sendBlocks` tasks to finish
             return pplx::when_all(sendBlockTasks.begin(), sendBlockTasks.end())
             .then([&](pplx::task<void> allTasks)
             {
@@ -583,21 +582,20 @@ public:
 
         calculateAndShowBlockDistribution(key);
 
-        // Timing point: end
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
         std::cout << "Total Time: " << duration.count() << " ms" << std::endl;
 
         std::cout << "PUT: successful" << std::endl;
 
-        // send response - empty body for now
+        // send success response
         http_response response(status_codes::OK);
         request.reply(response);
         return;
     }
 
     /**
-     * Deletes all blocks correpsonding to `key` from node `storageNodeId`.
+     * Deletes all blocks correpsonding to key `key` from node `storageNodeId`.
      */
     pplx::task<void> deleteBlocks(uint32_t storageNodeId, std::string key)
     {
@@ -631,8 +629,13 @@ public:
      * 
      * NOTE: TODO:
      * 
-     * At the moment, we don't send block numbers to delete.
-     * Will likely needs this in the future.
+     * At the moment, we don't accept specific block numbers
+     * to delete. 
+     * 
+     * i.e. we just delete all blocks corresponding
+     * to key `key`.
+     * 
+     * Rebalancing will likely require block-level deletion capability.
      */
     void deleteHandler(http_request request, const std::string key) 
     {
@@ -646,7 +649,7 @@ public:
             return;
         }
 
-        // Find all nodes that store at least 1 block for `key`
+        // find all nodes that store at least 1 block for `key`
         std::unordered_set<uint32_t> allNodeIds;
         std::shared_ptr<std::map<uint32_t, std::vector<uint32_t>>> blockNodeMap = this->keyBlockNodeListMap[key];
 
@@ -659,7 +662,7 @@ public:
 
         std::vector<pplx::task<void>> delBlockTasks;
 
-        // call `deleteBlocks` for each node
+        // call `deleteBlocks()` for each node
         for (uint32_t nodeId : allNodeIds)
         {
             auto task = deleteBlocks(nodeId, key);
@@ -690,7 +693,7 @@ public:
         // remove key's entry from KBN entirely
         this->keyBlockNodeListMap.erase(key);
 
-        // success response
+        // send success response
         std::cout << "DEL: successful" << std::endl;
         request.reply(status_codes::OK);
         return;
@@ -849,9 +852,6 @@ void run()
     std::string configFilePath = "../src/config.json";
     MasterServer masterServer = MasterServer(configFilePath);
     masterServer.startServer();
-
-    // MasterServerTests::runAll();
-    // HashRingTests::runAll();
 }
 
 int main() 
@@ -861,18 +861,19 @@ int main()
 
 /*
 TODO:
+    - try deploy to linux
     - do up some nice docs / readme stuff
         - give a chance to re-understand how all works
-    - master restarting
-        - i.e. minimal master persistence to rebuild from shutdown / reboot
+    - handle hash collisions
+    - user should receive actual error messages
     - /stats endpoint that reports 
       num blocks stored / bytes used / max size / free
       for each storage node
         - really want to make sure the files aren't just growing
         - just stress test it with a bunch of crap and see if it grows / buckles
-    - separate out each endpoint and their handlers into nice abstraction:
-        - nested class, etc.
-    - make docker directory
+    - master restarting
+        - i.e. minimal master persistence to rebuild from shutdown / reboot
+    - adding / removing nodes / rebalancing
     - investigate distribution of key's blocks 
         - particularly want to ensure that block numbers
           are themselves evenly distributed
@@ -880,12 +881,11 @@ TODO:
             - say we have 3 nodes and r = 3
             - don't want all 3 of block0 on node0, all 3 of block1 on node1 etc
             - pretty sure this isn't the case, but want  to make sure
-    - adding / removing nodes / rebalancing
     - understand and internalise CAP
     - implement concurrent r/w protections for DiskStorage
         - see bottom of server.cpp for plan
     - make .then() code non-blocking (related to concurrent r/w)
-    - user should receive actual error messages
+    
 
 bugs:
     - master sometimes segfaults weirdly
@@ -895,6 +895,8 @@ bugs:
         just returns junk output
 
 potentially:
+    - separate out each endpoint and their handlers into nice abstraction:
+        - nested class, etc.
     - way to run all tests with one command
     - authenticate requests from master -> server
         - token or generated API key

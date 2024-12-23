@@ -34,7 +34,7 @@ public:
     uint32_t replicationFactor;
 
     /**
-     * Size of data (in bytes) each Block object stores
+     * Size of data (in bytes) each data block (i.e. Block object) stores.
      */
     uint32_t dataBlockSize;
 };

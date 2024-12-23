@@ -520,6 +520,8 @@ void DiskStorage::createStoreFile()
     // create file
     this->storeFile = std::fstream(this->storeFilePath, 
         std::fstream::in | std::fstream::out | std::fstream::trunc | std::fstream::binary);
+    
+    std::cout << this->storeFilePath << std::endl;
 
     if (!this->storeFile.is_open())
         throw std::runtime_error("couldn't create store file");
@@ -701,13 +703,13 @@ namespace DiskStorageTests
     void setup()
     {
         // remove existing store of a previous test
-        FileSystemUtils::removeDirectory(fs::path("rackkey"));
+        fs::remove(fs::path("rackkey/store"));
     }
 
     void teardown()
     {
         // remove store created during current test
-        FileSystemUtils::removeDirectory(fs::path("rackkey"));
+        fs::remove(fs::path("rackkey/store"));
     }
 
     void testCanWriteAndReadNewHeaderAndBat()
@@ -725,7 +727,7 @@ namespace DiskStorageTests
         uint32_t N = 2;
         uint32_t numDataBytes = N * dataBlockSize;
         std::vector<std::vector<unsigned char>> writeDataBuffers;
-        auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        auto p = Block::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
         std::vector<Block> writeBlocks = p.first;
 
         ds.writeBlocks(key, writeBlocks);
@@ -768,7 +770,7 @@ namespace DiskStorageTests
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
         // write all blocks
-        auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        auto p = Block::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
         std::vector<Block> writeBlocks = p.first;
         std::unordered_set<uint32_t> blockNums = p.second;
 
@@ -827,7 +829,7 @@ namespace DiskStorageTests
 
             // Generate and write blocks
             // std::vector<Block> writeBlocks = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
-            auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+            auto p = Block::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
             std::vector<Block> writeBlocks = p.first;
             std::unordered_set<uint32_t> writeBlockNums = p.second;
             ds.writeBlocks(key, writeBlocks);
@@ -896,7 +898,7 @@ namespace DiskStorageTests
         uint32_t numDataBytes = N * dataBlockSize;
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
-        auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        auto p = Block::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
         std::vector<Block> writeBlocks = p.first;
         std::unordered_set<uint32_t> blockNums = p.second;
 
@@ -966,7 +968,7 @@ namespace DiskStorageTests
         std::cout << numDiskBlocks << std::endl;
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
-        auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        auto p = Block::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
         std::vector<Block> writeBlocks = p.first;
         ds.writeBlocks(key, writeBlocks);
 
@@ -1003,7 +1005,7 @@ namespace DiskStorageTests
         uint32_t numDiskBlocks = ds.getNumDiskBlocks(numTotalBytes);
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
-        auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        auto p = Block::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
         std::vector<Block> writeBlocks = p.first;
         ds.writeBlocks(key, writeBlocks);
 
@@ -1014,7 +1016,7 @@ namespace DiskStorageTests
         uint32_t newNumTotalBytes = newNumBytes + (newN * sizeof(uint32_t));
         uint32_t newNumDiskBlocks = ds.getNumDiskBlocks(newNumTotalBytes);
         writeDataBuffers.clear();
-        p = BlockUtils::generateRandom(newKey, dataBlockSize, newNumBytes, writeDataBuffers);
+        p = Block::generateRandom(newKey, dataBlockSize, newNumBytes, writeDataBuffers);
         writeBlocks = p.first;
         ds.writeBlocks(newKey, writeBlocks);
 
@@ -1048,7 +1050,7 @@ namespace DiskStorageTests
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
         // write N blocks
-        auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        auto p = Block::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
         std::vector<Block> writeBlocks = p.first;
         ds.writeBlocks(key, writeBlocks);
 
@@ -1065,7 +1067,7 @@ namespace DiskStorageTests
         numTotalBytes = numDataBytes + (M * sizeof(uint32_t));
         uint32_t numDiskBlocksM = ds.getNumDiskBlocks(numTotalBytes);
         writeDataBuffers.clear();
-        p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        p = Block::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
         writeBlocks = p.first;
         ds.writeBlocks(key, writeBlocks);
 
@@ -1106,7 +1108,7 @@ namespace DiskStorageTests
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
         // write N blocks for first key
-        auto p = BlockUtils::generateRandom(key1, dataBlockSize, numDataBytes, writeDataBuffers);
+        auto p = Block::generateRandom(key1, dataBlockSize, numDataBytes, writeDataBuffers);
         std::vector<Block> writeBlocks = p.first;
         ds.writeBlocks(key1, writeBlocks);
 
@@ -1117,7 +1119,7 @@ namespace DiskStorageTests
         numTotalBytes = numDataBytes + (N * sizeof(uint32_t));
         uint32_t numDiskBlocksKey2 = ds.getNumDiskBlocks(numTotalBytes);
         writeDataBuffers.clear();
-        p = BlockUtils::generateRandom(key2, dataBlockSize, numDataBytes, writeDataBuffers);
+        p = Block::generateRandom(key2, dataBlockSize, numDataBytes, writeDataBuffers);
         writeBlocks = p.first;
         ds.writeBlocks(key2, writeBlocks);
 
@@ -1131,7 +1133,7 @@ namespace DiskStorageTests
         numTotalBytes = numDataBytes + ((N+1) * sizeof(uint32_t));
         uint32_t numDiskBlocksKey3 = ds.getNumDiskBlocks(numTotalBytes);
         writeDataBuffers.clear();
-        p = BlockUtils::generateRandom(key3, dataBlockSize, numDataBytes, writeDataBuffers);
+        p = Block::generateRandom(key3, dataBlockSize, numDataBytes, writeDataBuffers);
         writeBlocks = p.first;
         ds.writeBlocks(key3, writeBlocks);
 
@@ -1171,7 +1173,7 @@ namespace DiskStorageTests
         uint32_t numTotalBytes = numDataBytes + (N * sizeof(uint32_t));
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
-        auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        auto p = Block::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
         std::vector<Block> writeBlocks = p.first;
         ds.writeBlocks(key, writeBlocks);
 
@@ -1191,7 +1193,7 @@ namespace DiskStorageTests
         uint32_t newNumTotalBytes = newNumDataBytes + (newN * sizeof(uint32_t));
         writeDataBuffers.clear();
 
-        p = BlockUtils::generateRandom(newKey, ds.header.diskBlockSize, newNumDataBytes, writeDataBuffers);
+        p = Block::generateRandom(newKey, ds.header.diskBlockSize, newNumDataBytes, writeDataBuffers);
         writeBlocks = p.first;
         try 
         {
@@ -1245,7 +1247,7 @@ namespace DiskStorageTests
         uint32_t numDiskBlocks = ds.getNumDiskBlocks(numDataBytes);
         std::vector<std::vector<unsigned char>> writeDataBuffers;
 
-        auto p = BlockUtils::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        auto p = Block::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
         std::vector<Block> writeBlocks = p.first;
         ds.writeBlocks(key, writeBlocks);
 
@@ -1261,7 +1263,7 @@ namespace DiskStorageTests
         uint32_t newN = 1;
         uint32_t newNumBytes = N * dataBlockSize;
         writeDataBuffers.clear();
-        p = BlockUtils::generateRandom(key, dataBlockSize, newNumBytes, writeDataBuffers);
+        p = Block::generateRandom(key, dataBlockSize, newNumBytes, writeDataBuffers);
         writeBlocks = p.first;
 
         /**

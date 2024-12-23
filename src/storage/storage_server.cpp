@@ -20,21 +20,23 @@ using namespace web::http::experimental::listener;
 class StorageServer
 {
 private:
-    StorageConfig config;
 
     /**
-     * On-disk storage
+     * On-disk storage for this node
      */
     std::unique_ptr<DiskStorage> diskStorage;
+
+    StorageConfig config;
 
 public:
 
     /**
-     * Default constructor
+     * Param constructor
      */
     StorageServer(std::string configFilePath)
         : config(configFilePath)
     {
+        // initialise on-disk storage
         std::string storeDirPath = config.storeDirPath;
         std::string storeFileName = config.storeFilePrefix + std::to_string(getNodeIDFromEnv());
         uint32_t diskBlockSize = config.diskBlockSize;
@@ -52,8 +54,6 @@ public:
 
     /**
      * Retreives blocks of the given `key` from storage.
-     * 
-     * TODO: fix hard coding of block size
      */
     void getHandler(http_request request, std::string key)
     {
@@ -63,7 +63,7 @@ public:
         std::vector<Block> blocks;
 
         /**
-         * Get block numbers from request payload
+         * Retreive block numbers from request payload
          */
         std::unordered_set<uint32_t> blockNums;
 
@@ -84,7 +84,11 @@ public:
         task.wait();
 
         /**
-         * Retreive requested blocks from disk
+         * Retreive requested blocks from disk.
+         * 
+         * NOTE: 
+         * 
+         * Each block's data pointers point to positions in `readBuffer`.
          */
         try 
         {
@@ -97,7 +101,7 @@ public:
             return;
         }
         
-        // serialize
+        // serialize blocks into response payload
         std::vector<unsigned char> payloadBuffer;
         for (auto block : blocks)
         {
@@ -111,7 +115,7 @@ public:
     }
 
     /**
-     * Writes given blocks to storage for the given `key`.
+     * Writes given blocks to storage for the given key `key`.
      */
     void putHandler(http_request request, std::string key)
     {
@@ -119,13 +123,14 @@ public:
 
         auto payloadBuffer = std::make_shared<std::vector<unsigned char>>();
 
+        /**
+         * Extract list of blocks from payload and write
+         * them to disk.
+         */
         pplx::task<void> task = request.extract_vector()
-
-        // extract list of blocks
         .then([&](std::vector<unsigned char> payload)
         {
             *payloadBuffer = std::move(payload);
-
             std::vector<Block> blocks = Block::deserialize(*payloadBuffer);
             
             try
@@ -143,12 +148,13 @@ public:
 
         task.wait();
 
+        // send success response
         request.reply(status_codes::OK);
         return;
     }
     
     /**
-     * Deletes all blocks of the given `key` from this node.
+     * Deletes all blocks of the given key `key` from this node.
      */
     void deleteHandler(http_request request, std::string key)
     {
@@ -163,6 +169,7 @@ public:
             request.reply(status_codes::InternalError);
         }
 
+        // send success response
         request.reply(status_codes::OK);
         return;
     }
@@ -251,45 +258,3 @@ int main()
 {
     run();
 }
-
-/*
-Immediate todo:
-    - checks in server.cpp that:
-        - blocks are in correct order (disk_storage presumes they are)
-        - first (blockNum - 1) blocks are full
-    - handle hash collisions of hash(key)
-        - heh?
-    - handle concurrent r/w of storeFile (below)
-
-Maybe:
-    - handle concurrent r/w
-        - i.e. use locks to prevent multiple threads
-          r/w store file at same time
-        - master may have multiple threads call same node
-          concurrently, in which case multiple storage server
-          threads will access same DiskStorage simultaneously
-        - can probably just lock the entire DiskStorage for now
-        - better approach:
-            - when read, obtain a shared lock 
-                - wait for any exclusive lock
-            - when write, obtain an exclusive lock
-                - wait for any exclusive AND shared lock
-    
-General cleanup:
-    - make helper method for opening and closing store file
-        - looks the same each time we do it
-    - nice explanation at top of disk_storage.cpp/.hpp
-    - emphasise difference between diskBlocks and dataBlocks
-        - ehhh...we are now only storing the data in our 
-          on-disk blocks, so there really is no distinction
-        - only potential complexity is that:
-            - for us, data block size == disk block size (always)
-            - think through consequences of allowing data vs disk block
-              size to be difference
-    - storage vs store naming? (DiskStorage -> StoreFile)?
-
-Long term:
-    - put servers on docker (once know stable)
-    - master periodically 'health checks' servers
-    - replication
-*/
