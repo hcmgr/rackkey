@@ -305,6 +305,9 @@ public:
     {
         std::cout << "GET req received: " << key << std::endl;
 
+        // timing point: start
+        auto start = std::chrono::high_resolution_clock::now();
+
         // check key exists
         if (this->keyBlockNodeListMap.find(key) == this->keyBlockNodeListMap.end())
         {
@@ -395,6 +398,11 @@ public:
             payloadBuffer.insert(payloadBuffer.end(), block.dataStart, block.dataEnd);
         }
 
+        // timing point: end
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        std::cout << "Total Time: " << duration.count() << " ms" << std::endl;
+
         std::cout << "GET: successful" << std::endl;
 
         // send success response
@@ -468,7 +476,7 @@ public:
     {
         std::cout << "PUT req received: " << key << std::endl;
 
-        // Timing point: start
+        // timing point: start
         auto start = std::chrono::high_resolution_clock::now();
 
         /**
@@ -580,8 +588,9 @@ public:
         if (!success)
             return;
 
-        calculateAndShowBlockDistribution(key);
+        // calculateAndShowBlockDistribution(key);
 
+        // timing point: end
         auto end = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
         std::cout << "Total Time: " << duration.count() << " ms" << std::endl;
@@ -895,6 +904,11 @@ bugs:
         just returns junk output
 
 potentially:
+    - each request should have an output stream that you print
+      at the end of the request (i.e. a logger)
+        - i.e. endpoint, request type, time taken, other info, etc.
+        - NOTE: build up throughout and print synchronously at the end
+          to avoid multi-threaded-printing-weirdness
     - separate out each endpoint and their handlers into nice abstraction:
         - nested class, etc.
     - way to run all tests with one command

@@ -1,7 +1,7 @@
 .vscode
 in/73MB.csv
 in/archive.zip
-out
+out/
 build
 *.out
 notes.txt
