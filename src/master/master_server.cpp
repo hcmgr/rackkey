@@ -870,10 +870,10 @@ int main()
 
 /*
 TODO:
-    - try deploy to linux
-    - do up some nice docs / readme stuff
+    - do up some nice docs
         - give a chance to re-understand how all works
     - handle hash collisions
+        - in BAT AND on hash ring
     - user should receive actual error messages
     - /stats endpoint that reports 
       num blocks stored / bytes used / max size / free
@@ -890,11 +890,11 @@ TODO:
             - say we have 3 nodes and r = 3
             - don't want all 3 of block0 on node0, all 3 of block1 on node1 etc
             - pretty sure this isn't the case, but want  to make sure
+    - indexation for store file (currently O(N) searching through all BAT entries)
     - understand and internalise CAP
     - implement concurrent r/w protections for DiskStorage
         - see bottom of server.cpp for plan
     - make .then() code non-blocking (related to concurrent r/w)
-    
 
 bugs:
     - master sometimes segfaults weirdly

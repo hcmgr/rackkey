@@ -1,18 +1,37 @@
-Distributed key value store in C++ (work in progress)
+Rackkey is a distributed key value store for arbitrary data types, including files, blobs, objects and in-memory data structures.
 
-### Required
-C++17
+### Key features
+- Distributed storage: Files are divided into blocks and distributed across a cluster of storage nodes.
+- Horizontal scalability: Easily scale your storage infrastructure by adding more nodes. Dockerized nodes and dynamic rebalancing ensures adding/removing nodes is easy as pie.
+- Efficient retreival: Utilizes indexation and a read-optimised on-disk format for fast data retreival.
+- Replication: Blocks are replicated across a configurable number of storage nodes, ensuring fault tolerance.
+- Monitoring: Node statistics and health checks makes it easy to monitor the  state of the storage cluster.
 
-### Install: Master and Storage
+### Supports:
+- multiple machines
+- replication
+- indexation 
+- dynamic rebalancing
+- node monitoring and statistics
+    
+## Install
+
+#### Master
+```bash
 sudo apt update
-sudo apt install g++
-sudo apt install cmake
-sudo apt install libssl-dev
-sudo apt-get install libcpprest-dev
+sudo apt-get install g++ cmake ## build
+sudo apt-get install libssl-dev libccprest-dev ## core libraries used
 
-## Install: Storage-specific
+sudo apt-get install unzip ## testing purposes
+```
 
-##### docker
+#### Storage
+```bash
+sudo apt update
+sudo apt-get install g++ cmake ## build
+sudo apt-get install libssl-dev libccprest-dev ## core libraries used
+
+## install docker
 sudo apt update
 sudo apt install apt-transport-https ca-certificates curl software-properties-common
 sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
@@ -20,24 +39,31 @@ sudo apt install docker-ce
 sudo systemctl status docker
 docker --version
 
-##### docker-compose
+## install docker-compose
 sudo curl -L "https://github.com/docker/compose/releases/download/v2.21.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
 sudo chmod +x /usr/local/bin/docker-compose
 docker-compose --version
+```
 
-## Other
-sudo apt install unzip
-
-## Steps: Master
+## Start services
+#### Master
+```bash
 mkdir build
 cd build
 cmake ..
 make
 ./master
+```
 
-## Steps: Storage
+#### Storage
+```bash
 mkdir ~/.rackkey
 cd src/storage/docker
 ./scripts/deploy.sh
+```
 
-## Client usage
+## Usage
+```bash
+curl -X PUT localhost:9000/store/images.zip --data-binary @in/images.zip
+curl -X GET localhost:9000/store/images.zip -o out/images.zip
+```
