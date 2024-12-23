@@ -1,8 +1,6 @@
 .vscode
-backup_in
-in/*.csv
-in/*.zip
-in/*.txt
+in/73MB.csv
+in/archive.zip
 out
 build
 *.out

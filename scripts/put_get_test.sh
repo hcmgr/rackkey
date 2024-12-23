@@ -1,9 +1,3 @@
-# curl -X PUT localhost:9000/store/images.zip --data-binary @in/images.zip
-# curl -X GET localhost:9000/store/images.zip -o out/images.zip
-# cd out/
-# unzip images.zip
-# cd ../
-
 # curl -X PUT localhost:9000/store/archive.zip --data-binary @in/archive.zip
 curl -X GET localhost:9000/store/archive.zip -o out/archive.zip
 cd out/
