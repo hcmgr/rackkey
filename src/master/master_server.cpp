@@ -326,7 +326,7 @@ public:
          * We store our 'choices' in nodeBlockMap, which is a mapping
          * of the form: {node id -> block num list}.
          */
-        std::map<uint32_t, std::vector<uint32_t>> nodeBlockMap;
+        std::unordered_map<uint32_t, std::vector<uint32_t>> nodeBlockMap;
         for (auto p : *(blockNodeMap))        
         {
             uint32_t blockNum = p.first;
@@ -498,7 +498,7 @@ public:
             uint32_t payloadSize = requestPayload->size();
             uint32_t blockCnt = 0;
 
-            std::map<uint32_t, std::vector<Block>> nodeBlockMap;
+            std::unordered_map<uint32_t, std::vector<Block>> nodeBlockMap;
 
             for (uint32_t i = 0; i < payloadSize; i += config.dataBlockSize) 
             {
@@ -545,7 +545,7 @@ public:
         })
 
         // send each storage node its block list
-        .then([&](std::map<uint32_t, std::vector<Block>> nodeBlockMap)
+        .then([&](std::unordered_map<uint32_t, std::vector<Block>> nodeBlockMap)
         {
             auto sendStart = std::chrono::high_resolution_clock::now();
 
@@ -861,7 +861,6 @@ int main()
 
 /*
 TODO:
-    - actual persistence
     - master restarting
         - i.e. minimal master persistence to rebuild from shutdown / reboot
     - do up some nice docs / readme stuff
@@ -873,9 +872,7 @@ TODO:
         - just stress test it with a bunch of crap and see if it grows / buckles
     - separate out each endpoint and their handlers into nice abstraction:
         - nested class, etc.
-    - fix weird bug where master sometimes segfaults weirdly
-        - maybe when its overloaded with requests?
-        - potentially have some testing where thrash it with requests
+    - fix weird bug where 
     - make docker directory
     - investigate distribution of key's blocks 
         - particularly want to ensure that block numbers
@@ -891,12 +888,19 @@ TODO:
     - make .then() code non-blocking (related to concurrent r/w)
     - user should receive actual error messages
 
-    potentially:
-        - way to run all tests with one command
-        - authenticate requests from master -> server
-            - token or generated API key
-        - if writing out more nodes in docker-compose.yml gets annoying, 
-          write python script to generate one (probs makes stuff just less clear though)
+bugs:
+    - master sometimes segfaults weirdly
+        - maybe when its overloaded with requests?
+        - potentially have some testing where thrash it with requests
+    - when num healthy nodes < R, should throw an error (doesn't right now),
+        just returns junk output
+
+potentially:
+    - way to run all tests with one command
+    - authenticate requests from master -> server
+        - token or generated API key
+    - if writing out more nodes in docker-compose.yml gets annoying, 
+        write python script to generate one (probs makes stuff just less clear though)
 
 WITH REPLICATION PLAN:
     GET:

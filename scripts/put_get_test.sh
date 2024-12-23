@@ -7,7 +7,7 @@
 # curl -X PUT localhost:9000/store/archive.zip --data-binary @in/archive.zip
 curl -X GET localhost:9000/store/archive.zip -o out/archive.zip
 cd out/
-unzip archive.zip
+unzip -o archive.zip
 cd ../
 
 # curl -X PUT localhost:9000/store/small_shakespeare.txt --data-binary @in/small_shakespeare.txt

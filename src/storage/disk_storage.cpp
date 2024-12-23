@@ -177,48 +177,6 @@ DiskStorage::DiskStorage(
     initialiseStorage(diskBlockSize, maxDataSize, removeExistingStore);
 }
 
-
-
-// DiskStorage::DiskStorage(
-//     std::string storeDirPath,
-//     std::string storeFileName,
-//     uint32_t diskBlockSize,
-//     uint32_t maxDataSize,
-//     bool removeExistingStore
-// )
-//     : storeDirPath(fs::path(storeDirPath)),
-//       storeFileName(storeFileName),
-//       removeExistingStore(removeExistingStore)
-// {
-//     this->storeFilePath = this->storeDirPath / this->storeFileName;
-
-//     if (removeExistingStore)
-//         FileSystemUtils::removeDirectory(this->storeDirPath);
-
-//     // initialise from existing store file
-//     if (!removeExistingStore && fs::exists(this->storeFilePath))
-//     {
-//         readHeader();
-//         readBAT();
-//         freeSpaceMap.initialise(getNumDiskBlocks(maxDataSize));
-//         populateFreeSpaceMapFromFile();
-
-//         std::cout << "Reading from existing store file: " << this->storeFilePath << std::endl;
-//         std::cout << this->bat.toString() << std::endl;
-//     }
-
-//     // create new store file
-//     else 
-//     {
-//         createStoreFile();
-//         initialiseHeader(diskBlockSize, maxDataSize);
-//         writeHeader();
-//         freeSpaceMap.initialise(getNumDiskBlocks(maxDataSize));
-
-//         std::cout << "Created new store file: " << this->storeFilePath << std::endl;
-//     }
-// }
-
 DiskStorage::~DiskStorage()
 {
 }
@@ -574,33 +532,6 @@ void DiskStorage::createStoreFile()
     this->storeFile.close();
 
 }
-
-// void DiskStorage::createStoreFile()
-// {
-//     // expand '~' to the home directory if present
-//     if (this->storeDirPath.string()[0] == '~')
-//     {
-//         const char* homeDir = std::getenv("HOME");
-//         this->storeDirPath = fs::path(homeDir) / this->storeDirPath.string().substr(2);
-//     }
-
-//     // create directory
-//     fs::create_directory(this->storeDirPath);
-
-//     // create file
-//     this->storeFile = std::fstream(this->storeFilePath, 
-//         std::fstream::in | std::fstream::out | std::fstream::trunc | std::fstream::binary);
-
-//     if (!this->storeFile.is_open())
-//         throw std::runtime_error("couldn't create store file");
-
-//     // write to max byte
-//     uint32_t totalFileSize = this->getTotalFileSize();
-//     this->storeFile.seekp(totalFileSize - 1);
-//     this->storeFile.put(0);
-//     this->storeFile.flush();
-//     this->storeFile.close();
-// }
 
 /**
  * Initialises the file header.
