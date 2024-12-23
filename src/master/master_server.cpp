@@ -861,10 +861,10 @@ int main()
 
 /*
 TODO:
-    - master restarting
-        - i.e. minimal master persistence to rebuild from shutdown / reboot
     - do up some nice docs / readme stuff
         - give a chance to re-understand how all works
+    - master restarting
+        - i.e. minimal master persistence to rebuild from shutdown / reboot
     - /stats endpoint that reports 
       num blocks stored / bytes used / max size / free
       for each storage node
@@ -872,7 +872,6 @@ TODO:
         - just stress test it with a bunch of crap and see if it grows / buckles
     - separate out each endpoint and their handlers into nice abstraction:
         - nested class, etc.
-    - fix weird bug where 
     - make docker directory
     - investigate distribution of key's blocks 
         - particularly want to ensure that block numbers
