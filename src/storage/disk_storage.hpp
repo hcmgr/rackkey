@@ -97,14 +97,14 @@ public:
     FreeSpaceMap freeSpaceMap;
 
     /**
-     * Default constructor
+     * Param constructor
      */
     DiskStorage(
-        std::string storeDirPath = "rackkey",
+        std::string storeDirPath = "/rackkey",
         std::string storeFileName = "store",
         uint32_t diskBlockSize = 4096,
         uint32_t maxDataSize = 1u << 30,
-        bool removeExistingStore = false
+        bool removeExistingStoreFile = false
     );
 
     ~DiskStorage();
@@ -180,13 +180,17 @@ private:
 
     const uint32_t magicNumber = 0xABABABAB;
 
-    fs::path storeDirPath;
-    std::string storeFileName;
-
     fs::path storeFilePath;
     std::fstream storeFile;
 
-    bool removeExistingStore;
+    /**
+     * Either creates a new store file, or initialises from an existing one.
+     */
+    void initialiseStorage(
+        uint32_t diskBlockSize,
+        uint32_t maxDataSize,
+        bool removeExistingStore
+    );
 
     /**
      * Creates a new store file in a new store directory.
@@ -227,8 +231,6 @@ private:
      * Returns true if the local copy of the header is valid, false otherwise.
      */
     bool headerValid();
-
-
 };
 
 ////////////////////////////////////////////

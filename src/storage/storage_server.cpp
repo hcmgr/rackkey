@@ -25,7 +25,7 @@ private:
     /**
      * On-disk storage
      */
-    DiskStorage diskStorage;
+    std::unique_ptr<DiskStorage> diskStorage;
 
 public:
 
@@ -33,9 +33,21 @@ public:
      * Default constructor
      */
     StorageServer(std::string configFilePath)
-        : config(configFilePath),
-          diskStorage("rackkey", "store", config.diskBlockSize, 1u << config.maxDataSizePower, true)
+        : config(configFilePath)
     {
+        std::string storeDirPath = config.storeDirPath;
+        std::string storeFileName = config.storeFilePrefix + std::to_string(getNodeIDFromEnv());
+        uint32_t diskBlockSize = config.diskBlockSize;
+        uint32_t maxDataSize = 1u << config.maxDataSizePower;
+        bool removeExistingStoreFile = config.removeExistingStoreFile;
+        
+        this->diskStorage = std::make_unique<DiskStorage>(
+            storeDirPath,
+            storeFileName,
+            diskBlockSize,
+            maxDataSize,
+            removeExistingStoreFile
+        );
     }
 
     /**
@@ -76,7 +88,7 @@ public:
          */
         try 
         {
-            blocks = diskStorage.readBlocks(key, blockNums, config.dataBlockSize, readBuffer);
+            blocks = diskStorage->readBlocks(key, blockNums, config.dataBlockSize, readBuffer);
         }
         catch (std::runtime_error &e)
         {
@@ -118,7 +130,7 @@ public:
             
             try
             {
-                diskStorage.writeBlocks(key, blocks);
+                diskStorage->writeBlocks(key, blocks);
             }
             catch (std::runtime_error &e)
             {
@@ -143,7 +155,7 @@ public:
         std::cout << "DEL req received: " << key << std::endl;
         try
         {
-            diskStorage.deleteBlocks(key);
+            diskStorage->deleteBlocks(key);
         }
         catch (std::runtime_error &e)
         {
@@ -168,6 +180,14 @@ public:
          */
         request.reply(status_codes::OK);
         return;
+    }
+
+    /**
+     * Retreives node's unique id via the environment variable `NODE_ID`.
+     */
+    int getNodeIDFromEnv() {
+        const char* envNodeID = std::getenv("NODE_ID");
+        return envNodeID ? std::stoi(envNodeID) : 0;
     }
 
     void startServer() 

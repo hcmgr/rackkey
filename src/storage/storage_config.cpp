@@ -13,8 +13,11 @@ void StorageConfig::loadVariables()
      */
     json::value storageConfig = this->jsonConfig.at(U("storageServer"));
 
+    this->storeDirPath = storageConfig.at(U("storeDirPath")).as_string();
+    this->storeFilePrefix = storageConfig.at(U("storeFilePrefix")).as_string();
     this->diskBlockSize = storageConfig.at(U("diskBlockSize")).as_integer();
     this->maxDataSizePower = storageConfig.at(U("maxDataSizePower")).as_integer();
+    this->removeExistingStoreFile = storageConfig.at(U("removeExistingStoreFile")).as_bool();
 
     /**
      * shared config

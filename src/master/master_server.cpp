@@ -202,7 +202,6 @@ public:
                     }
                     catch (const http_exception &e)
                     {
-                        // std::cout << "Node " << nodeId << ": " << e.what() << std::endl;
                         {
                             std::lock_guard<std::mutex> lock(this->nodeHealthMapMutex);
                             this->nodeHealthMap[nodeId] = false;
@@ -863,6 +862,8 @@ int main()
 /*
 TODO:
     - actual persistence
+    - master restarting
+        - i.e. minimal master persistence to rebuild from shutdown / reboot
     - do up some nice docs / readme stuff
         - give a chance to re-understand how all works
     - /stats endpoint that reports 
@@ -872,6 +873,9 @@ TODO:
         - just stress test it with a bunch of crap and see if it grows / buckles
     - separate out each endpoint and their handlers into nice abstraction:
         - nested class, etc.
+    - fix weird bug where master sometimes segfaults weirdly
+        - maybe when its overloaded with requests?
+        - potentially have some testing where thrash it with requests
     - make docker directory
     - investigate distribution of key's blocks 
         - particularly want to ensure that block numbers
@@ -880,14 +884,12 @@ TODO:
             - say we have 3 nodes and r = 3
             - don't want all 3 of block0 on node0, all 3 of block1 on node1 etc
             - pretty sure this isn't the case, but want  to make sure
-    
     - adding / removing nodes / rebalancing
-    - master restarting
-        - i.e. minimal master persistence to rebuild from shutdown / reboot
     - understand and internalise CAP
     - implement concurrent r/w protections for DiskStorage
         - see bottom of server.cpp for plan
     - make .then() code non-blocking (related to concurrent r/w)
+    - user should receive actual error messages
 
     potentially:
         - way to run all tests with one command

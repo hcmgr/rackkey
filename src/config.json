@@ -4,19 +4,20 @@
         "storageNodeIPs": [
             "http://127.0.0.1:8081",
             "http://127.0.0.1:8082",
-            "http://127.0.0.1:8083",
-            "http://127.0.0.1:8084",
-            "http://127.0.0.1:8085"
+            "http://127.0.0.1:8083"
         ],
         "healthCheckPeriodMs": 1000,
         "numVirtualNodes": 50,
         "dataBlockSize": 4096,
-        "replicationFactor": 3
+        "replicationFactor": 2
     },
 
     "storageServer": {
+        "storeDirPath": "/rackkey",
+        "storeFilePrefix": "store",
         "diskBlockSize": 4096,
-        "maxDataSizePower": 30
+        "maxDataSizePower": 30,
+        "removeExistingStoreFile": false
     },
 
     "shared": {

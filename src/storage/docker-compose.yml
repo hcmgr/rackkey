@@ -12,56 +12,62 @@ services:
       - NODE_ID=0
     restart: always
     container_name: Node_0
+    volumes:
+      - ~/rackkey:/rackkey
 
-  storage-node-1:
-    image: storage-server
-    build:
-      context: ../
-      dockerfile: storage/Dockerfile 
-    ports:
-      - "8082:8080" 
-    environment:
-      - PORT=8080
-      - NODE_ID=1
-    restart: always
-    container_name: Node_1
+  # storage-node-1:
+  #   image: storage-server
+  #   build:
+  #     context: ../
+  #     dockerfile: storage/Dockerfile 
+  #   ports:
+  #     - "8082:8080" 
+  #   environment:
+  #     - PORT=8080
+  #     - NODE_ID=1
+  #   restart: always
+  #   container_name: Node_1
+  #   volumes:
+  #     - ~/rackkey:/rackkey
 
-  storage-node-2:
-    image: storage-server
-    build:
-      context: ../
-      dockerfile: storage/Dockerfile
-    ports:
-      - "8083:8080"  
-    environment:
-      - PORT=8080
-      - NODE_ID=2
-    restart: always
-    container_name: Node_2
+  # storage-node-2:
+  #   image: storage-server
+  #   build:
+  #     context: ../
+  #     dockerfile: storage/Dockerfile
+  #   ports:
+  #     - "8083:8080"  
+  #   environment:
+  #     - PORT=8080
+  #     - NODE_ID=2
+  #   restart: always
+  #   container_name: Node_2
+  #   volumes:
+  #     - ~/rackkey:/rackkey
 
-  storage-node-3:
-    image: storage-server
-    build:
-      context: ../
-      dockerfile: storage/Dockerfile
-    ports:
-      - "8084:8080"  
-    environment:
-      - PORT=8080
-      - NODE_ID=3
-    restart: always
-    container_name: Node_3
+  # storage-node-3:
+  #   image: storage-server
+  #   build:
+  #     context: ../
+  #     dockerfile: storage/Dockerfile
+  #   ports:
+  #     - "8084:8080"  
+  #   environment:
+  #     - PORT=8080
+  #     - NODE_ID=3
+  #   restart: always
+  #   container_name: Node_3
 
-  storage-node-4:
-    image: storage-server
-    build:
-      context: ../
-      dockerfile: storage/Dockerfile
-    ports:
-      - "8085:8080"  
-    environment:
-      - PORT=8080
-      - NODE_ID=4
-    restart: always
-    container_name: Node_4
+  # storage-node-4:
+  #   image: storage-server
+  #   build:
+  #     context: ../
+  #     dockerfile: storage/Dockerfile
+  #   ports:
+  #     - "8085:8080"  
+  #   environment:
+  #     - PORT=8080
+  #     - NODE_ID=4
+  #   restart: always
+  #   container_name: Node_4
   ##########################
