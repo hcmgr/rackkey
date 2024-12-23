@@ -14,13 +14,6 @@ A distributed key value store for arbitrary data types, including files, blobs, 
 - Monitoring: 
     - Node statistics and health checks makes it easy to monitor the  state of the storage cluster.
 
-### Supports:
-- multiple machines
-- replication
-- indexation 
-- dynamic rebalancing
-- node monitoring and statistics
-
 ### API
 ##### `/store/{KEY}`
 - GET/PUT/DELETE
@@ -68,7 +61,7 @@ sudo chmod +x /usr/local/bin/docker-compose
 docker-compose --version
 ```
 
-### Start services
+### Run
 ##### Master
 ```bash
 mkdir build
