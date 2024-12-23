@@ -3,11 +3,16 @@
 A distributed key value store for arbitrary data types, including files, blobs, objects and in-memory data structures.
 
 ### Key features
-- Distributed storage: Files are divided into blocks and distributed across a cluster of storage nodes.
-- Horizontal scalability: Easily scale your storage infrastructure by adding more nodes. Dockerized nodes and dynamic rebalancing ensures adding/removing nodes is easy as pie.
-- Efficient retreival: Utilizes indexation and a read-optimised on-disk format for fast data retreival.
-- Replication: Blocks are replicated across a configurable number of storage nodes, ensuring fault tolerance.
-- Monitoring: Node statistics and health checks makes it easy to monitor the  state of the storage cluster.
+- Distributed storage: 
+    - Files are divided into blocks and distributed across a cluster of storage nodes.
+- Horizontal scalability: 
+    - Easily scale your storage infrastructure by adding more nodes. Dockerized nodes and dynamic rebalancing ensures adding/removing nodes is easy as pie.
+- Efficient retreival: 
+    - Utilizes indexation and a read-optimised on-disk format for fast data retreival.
+- Replication: 
+    - Blocks are replicated across a configurable number of storage nodes, ensuring fault tolerance.
+- Monitoring: 
+    - Node statistics and health checks makes it easy to monitor the  state of the storage cluster.
 
 ### Supports:
 - multiple machines
