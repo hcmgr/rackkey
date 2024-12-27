@@ -3,6 +3,7 @@
 #include <cpprest/http_client.h>
 
 #include <iostream>
+#include <set>
 #include <map>
 #include <unordered_set>
 #include <chrono>
@@ -34,7 +35,7 @@ public:
     HashRing hashRing;
 
     /**
-     * Stores mapping of the form: key -> {block num -> storage node id list}.
+     * Stores mapping of the form: key -> {block num -> storage node id set}.
      * 
      * i.e. for each KEY, we store a mapping from block number to a list of storage node ids.
      * 
@@ -42,7 +43,7 @@ public:
      * 
      * Nicknamed the 'KBN' for brevity.
      */
-    std::map<std::string, std::shared_ptr<std::map<uint32_t, std::vector<uint32_t>>>> keyBlockNodeListMap;
+    std::map<std::string, std::shared_ptr<std::map<uint32_t, std::set<uint32_t>>>> keyBlockNodeMap;
 
     /**
      * Stores our storage nodes.
@@ -65,7 +66,7 @@ public:
     /* Default constructor */
     MasterServer(std::string configFilePath) 
         : hashRing(),
-          keyBlockNodeListMap(),
+          keyBlockNodeMap(),
           config(configFilePath)
     {
         addInitialStorageNodes();
@@ -84,14 +85,14 @@ public:
     {
         std::map<uint32_t, uint32_t> nodeBlockCounts; // node id -> block count
         
-        std::map<uint32_t, std::vector<uint32_t>> blockNodeListMap = *(this->keyBlockNodeListMap[key]);
-        uint32_t totalNumBlocks = blockNodeListMap.size();
+        std::map<uint32_t, std::set<uint32_t>> blockNodeMap = *(this->keyBlockNodeMap[key]);
+        uint32_t totalNumBlocks = blockNodeMap.size();
         uint32_t totalNumReplicatedBlocks = 0;
 
-        for (auto p: blockNodeListMap)
+        for (auto p: blockNodeMap)
         {
             uint32_t blockNum = p.first; 
-            std::vector<uint32_t> nodeIds = p.second;
+            std::set<uint32_t> nodeIds = p.second;
 
             for (auto nodeId : nodeIds)
             {
@@ -288,14 +289,14 @@ public:
         auto start = std::chrono::high_resolution_clock::now();
 
         // check key exists
-        if (this->keyBlockNodeListMap.find(key) == this->keyBlockNodeListMap.end())
+        if (this->keyBlockNodeMap.find(key) == this->keyBlockNodeMap.end())
         {
             std::cout << "GET: failed - key doesn't exist" << std::endl;
             request.reply(status_codes::InternalError);
             return;
         }
 
-        std::shared_ptr<std::map<uint32_t, std::vector<uint32_t>>> blockNodeMap = this->keyBlockNodeListMap[key];
+        std::shared_ptr<std::map<uint32_t, std::set<uint32_t>>> blockNodeMap = this->keyBlockNodeMap[key];
         
         /**
          * For each block, we chose the first healthy storage node that
@@ -308,7 +309,7 @@ public:
         for (auto p : *(blockNodeMap))        
         {
             uint32_t blockNum = p.first;
-            std::vector<uint32_t> nodeIds = p.second;
+            std::set<uint32_t> nodeIds = p.second;
 
             bool foundHealthy = false;
             for (auto nodeId : nodeIds)
@@ -404,7 +405,7 @@ public:
         uint32_t storageNodeId,
         std::string key,
         std::vector<Block> &blocks,
-        std::shared_ptr<std::map<uint32_t, std::vector<uint32_t>>> blockNodeMap
+        std::shared_ptr<std::map<uint32_t, std::set<uint32_t>>> blockNodeMap
     )
     {
         std::shared_ptr<StorageNode> sn = this->storageNodes[storageNodeId];
@@ -433,7 +434,8 @@ public:
 
                 // assign each block to node `storageNodeId`
                 for (auto &block : blocks)
-                    (*blockNodeMap)[block.blockNum].push_back(storageNodeId);
+                    // (*blockNodeMap)[block.blockNum].push_back(storageNodeId);
+                    (*blockNodeMap)[block.blockNum].insert(storageNodeId);
                 
                 return response.extract_vector();
             })
@@ -441,10 +443,10 @@ public:
             .then([=](std::vector<unsigned char> payload)
             {
                 // if overriding existing blocks, subtract their stats contribution
-                if (this->keyBlockNodeListMap.find(key) != this->keyBlockNodeListMap.end())
+                if (this->keyBlockNodeMap.find(key) != this->keyBlockNodeMap.end())
                 {
                     uint32_t existingBlocks = 0;
-                    for (auto &p : *(this->keyBlockNodeListMap[key]))
+                    for (auto &p : *(this->keyBlockNodeMap[key]))
                     {
                         if (std::find(p.second.begin(), p.second.end(), storageNodeId) != p.second.end())
                             existingBlocks++;
@@ -480,7 +482,7 @@ public:
          * 
          * i.e. {block num -> [nodeA, nodeB, ...]}
          */
-        auto blockNodeMap = std::make_shared<std::map<uint32_t, std::vector<uint32_t>>>();
+        auto blockNodeMap = std::make_shared<std::map<uint32_t, std::set<uint32_t>>>();
 
         auto requestPayload = std::make_shared<std::vector<unsigned char>>();
 
@@ -571,7 +573,7 @@ public:
                     allTasks.get();
 
                     // update kbn
-                    this->keyBlockNodeListMap[key] = blockNodeMap;
+                    this->keyBlockNodeMap[key] = blockNodeMap;
                 }
                 catch (const std::exception& e)
                 {
@@ -632,7 +634,7 @@ public:
         .then([=](std::vector<unsigned char> payload)
         {
             // update node's stats
-            uint32_t blocksAdded = this->keyBlockNodeListMap[key]->size();
+            uint32_t blocksAdded = this->keyBlockNodeMap[key]->size();
             sn->stats.blocksStored += blocksAdded;
 
             updateNodeSizesFromSizesResponse(sn, payload);
@@ -662,7 +664,7 @@ public:
         std::cout << "DEL req received: " << key << std::endl;
 
         // check key exists
-        if (this->keyBlockNodeListMap.find(key) == this->keyBlockNodeListMap.end())
+        if (this->keyBlockNodeMap.find(key) == this->keyBlockNodeMap.end())
         {
             std::cout << "DEL: failed - key doesn't exist" << std::endl;
             request.reply(status_codes::InternalError);
@@ -671,7 +673,7 @@ public:
 
         // find all nodes that store at least 1 block for `key`
         std::unordered_set<uint32_t> allNodeIds;
-        std::shared_ptr<std::map<uint32_t, std::vector<uint32_t>>> blockNodeMap = this->keyBlockNodeListMap[key];
+        std::shared_ptr<std::map<uint32_t, std::set<uint32_t>>> blockNodeMap = this->keyBlockNodeMap[key];
 
         for (auto p : *(blockNodeMap))
         {
@@ -711,7 +713,7 @@ public:
             return;
         
         // remove key's entry from KBN entirely
-        this->keyBlockNodeListMap.erase(key);
+        this->keyBlockNodeMap.erase(key);
 
         // send success response
         std::cout << "DEL: successful" << std::endl;
@@ -729,7 +731,7 @@ public:
         std::cout << "GET /keys req received" << std::endl;
 
         std::ostringstream oss;
-        for (const auto &p : keyBlockNodeListMap)
+        for (const auto &p : keyBlockNodeMap)
             oss << p.first << "\n";
         
         request.reply(status_codes::OK, oss.str());
@@ -1042,7 +1044,7 @@ int main()
 
 /*
 TODO:
-    - update stats on PUT and DEL
+    - fix retarded existingBlocks stats subtract
     - find nice abstraction for endpoints
     - generally fix up .then logic
         - not really async sometimes
