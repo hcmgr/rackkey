@@ -60,14 +60,6 @@ public:
     std::map<uint32_t, std::shared_ptr<http_client>> openConnections;
     std::mutex openConnectionsMutex;
 
-    /**
-     * Stores 'health status' of nodes, as per last health check.
-     * 
-     * Mapping is of the form: storage node id -> 'health status' boolean
-     */
-    std::map<uint32_t, bool> nodeHealthMap;
-    std::mutex nodeHealthMapMutex;
-
     MasterConfig config;
 
     /* Default constructor */
@@ -142,9 +134,6 @@ public:
             // add all virtual nodes to the hash ring
             for (auto &vn : storageNode->virtualNodes)
                 hashRing.addNode(vn);
-            
-            // node must prove beyond reasonable doubt its healthy
-            this->nodeHealthMap[storageNode->id] = false;
         }
     }
 
@@ -166,12 +155,8 @@ public:
              * Every `period` milliseconds, send a GET to the /health/ endpoint
              * of each storage node.
              * 
-             * Update our nodeHealthMap accordingly.
+             * Update the health status of each StorageNode object accordingly.
              */
-
-            std::this_thread::sleep_for(
-                std::chrono::milliseconds(period)
-            );
 
             std::vector<pplx::task<void>> healthCheckTasks;
             for (auto p : storageNodes)
@@ -187,25 +172,19 @@ public:
                 req.set_request_uri(U("/health/"));
 
                 auto task = client->request(req)
-                .then([this, nodeId](pplx::task<http_response> prevTask){
+                .then([=](pplx::task<http_response> prevTask){
                     try
                     {
                         // can throw an http_exception if connection isn't established
                         http_response resp = prevTask.get();
 
                         bool isHealthy = (resp.status_code() == status_codes::OK);
+                        sn->isHealthy = isHealthy;
 
-                        {
-                            std::lock_guard<std::mutex> lock(this->nodeHealthMapMutex);
-                            this->nodeHealthMap[nodeId] = isHealthy;
-                        }
                     }
                     catch (const http_exception &e)
                     {
-                        {
-                            std::lock_guard<std::mutex> lock(this->nodeHealthMapMutex);
-                            this->nodeHealthMap[nodeId] = false;
-                        }
+                        sn->isHealthy = false;
                     }
                 });
 
@@ -215,6 +194,11 @@ public:
             // wait on all request tasks - we're on a separate thread so this won't hurt
             auto task = pplx::when_all(healthCheckTasks.begin(), healthCheckTasks.end());
             task.wait();
+
+            // wait for `period` ms
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds(period)
+            );
         }
     }
 
@@ -329,7 +313,8 @@ public:
             bool foundHealthy = false;
             for (auto nodeId : nodeIds)
             {
-                if (this->nodeHealthMap[nodeId])
+                std::shared_ptr<StorageNode> sn = this->storageNodes[nodeId];
+                if (sn->isHealthy)
                 {
                     nodeBlockMap[nodeId].push_back(blockNum);
                     foundHealthy = true;
@@ -426,12 +411,10 @@ public:
 
         auto client = getHttpClient(sn);
 
-        // populate body
+        // populate request payload
         std::vector<unsigned char> payloadBuffer;
         for (auto &block : blocks)
-        {
             block.serialize(payloadBuffer);
-        }
 
         // build and send request
         http_request req = http_request();
@@ -447,15 +430,33 @@ public:
                     throw std::runtime_error(
                         "sendBlocks() failed with status: " + std::to_string(response.status_code()));
                 }
+
+                // assign each block to node `storageNodeId`
+                for (auto &block : blocks)
+                    (*blockNodeMap)[block.blockNum].push_back(storageNodeId);
+                
+                return response.extract_vector();
             })
 
-            // assign blocks to node `storageNodeId`
-            .then([=]()
+            .then([=](std::vector<unsigned char> payload)
             {
-                for (auto &block : blocks)
+                // if overriding existing blocks, subtract their stats contribution
+                if (this->keyBlockNodeListMap.find(key) != this->keyBlockNodeListMap.end())
                 {
-                    (*blockNodeMap)[block.blockNum].push_back(storageNodeId);
+                    uint32_t existingBlocks = 0;
+                    for (auto &p : *(this->keyBlockNodeListMap[key]))
+                    {
+                        if (std::find(p.second.begin(), p.second.end(), storageNodeId) != p.second.end())
+                            existingBlocks++;
+                    }
+                    sn->stats.blocksStored -= existingBlocks;
                 }
+
+                // update node's stats
+                uint32_t blocksAdded = blocks.size();
+                sn->stats.blocksStored += blocksAdded;
+
+                updateNodeSizesFromSizesResponse(sn, payload);
             });
 
         return task;
@@ -526,11 +527,12 @@ public:
                 {
                     std::shared_ptr<VirtualNode> vn = this->hashRing.findNextNode(hash);
                     uint32_t nodeId = vn->physicalNodeId;
+                    std::shared_ptr<StorageNode> sn = this->storageNodes[nodeId];
 
-                    if (
-                        usedStorageNodes.find(nodeId) == usedStorageNodes.end() &&  // node is un-used by block
-                        this->nodeHealthMap[nodeId]  // node is healthy
-                       )
+                    bool nodeUnusedByBlock = usedStorageNodes.find(nodeId) == usedStorageNodes.end();
+                    bool nodeHealthy = sn->isHealthy;
+
+                    if (nodeUnusedByBlock && nodeHealthy)
                     {
                         nodeBlockMap[nodeId].push_back(block);
                         usedStorageNodes.insert(nodeId);
@@ -567,6 +569,8 @@ public:
                 try
                 {
                     allTasks.get();
+
+                    // update kbn
                     this->keyBlockNodeListMap[key] = blockNodeMap;
                 }
                 catch (const std::exception& e)
@@ -621,6 +625,17 @@ public:
                     "deleteBlocks() failed with status: " + std::to_string(response.status_code())
                 );
             }
+
+            return response.extract_vector();
+        })
+
+        .then([=](std::vector<unsigned char> payload)
+        {
+            // update node's stats
+            uint32_t blocksAdded = this->keyBlockNodeListMap[key]->size();
+            sn->stats.blocksStored += blocksAdded;
+
+            updateNodeSizesFromSizesResponse(sn, payload);
         });
 
         return task;
@@ -720,6 +735,29 @@ public:
         request.reply(status_codes::OK, oss.str());
     }
 
+    void updateNodeSizesFromSizesResponse(
+        std::shared_ptr<StorageNode> sn,
+        std::vector<unsigned char> &responseBuffer)
+    {
+        uint32_t dataUsedSize;
+        uint32_t dataTotalSize;
+        uint32_t dataFreeSize;
+
+        auto it = responseBuffer.begin();
+
+        std::memcpy(&dataUsedSize, &(*it), sizeof(dataUsedSize));
+        it += sizeof(dataUsedSize);
+        std::memcpy(&dataTotalSize, &(*it), sizeof(dataTotalSize));
+        it += sizeof(dataTotalSize);
+
+        assert(it == responseBuffer.end());
+
+        sn->stats.dataBytesUsed = dataUsedSize;
+        sn->stats.dataBytesFree = dataTotalSize - dataUsedSize;
+        sn->stats.dataBytesTotal = dataTotalSize;
+        return;
+    }
+
     std::string centerText(std::string text, int width) {
         size_t size = text.size(); 
 
@@ -731,7 +769,7 @@ public:
         return std::string(padding, ' ') + text + std::string(padding + extra, ' ');
     }
 
-    std::ostringstream displayStats()
+    std::ostringstream createStatsDisplay()
     {
         std::ostringstream oss;
 
@@ -871,43 +909,8 @@ public:
     {
         std::cout << "GET /stats req received" << std::endl;
 
-        /**
-         * Collect stats
-         */
-        std::map<uint32_t, bool> nodeStatus; // { node id -> isHealthy }
-        for (auto &p : this->storageNodes)
-            nodeStatus[p.first] = this->nodeHealthMap[p.first];
-
-        std::map<uint32_t, uint32_t> nodeNumBlocks; // { node id -> #blocks }
-        for (auto &p : this->keyBlockNodeListMap)
-        {
-            std::map<uint32_t, std::vector<uint32_t>> &blockNodeListMap = *(p.second);
-            for (auto &q : blockNodeListMap)
-            {
-                std::vector<uint32_t> &nodes = q.second;
-                for (auto &nodeId : nodes)
-                {
-                    if (nodeNumBlocks.find(nodeId) == nodeNumBlocks.end())
-                        nodeNumBlocks[nodeId] = 0;
-                    nodeNumBlocks[nodeId]++;
-                }
-            }
-        }
-
-        std::vector<pplx::task<void>> getStatsTasks;
-        for (auto &p : this->storageNodes)
-        {
-            uint32_t nodeId = p.first;
-
-            auto task = getNodeStats(p.first);
-            getStatsTasks.push_back(task);
-        }
-    
-        auto task = pplx::when_all(getStatsTasks.begin(), getStatsTasks.end());
-        task.wait();
-
-        std::ostringstream oss = displayStats();
-        request.reply(status_codes::OK, oss.str());
+        std::ostringstream statsDisplay = createStatsDisplay();
+        request.reply(status_codes::OK, statsDisplay.str());
     }
 
     void router(http_request request) {
@@ -969,10 +972,6 @@ public:
             std::cout << "An error occurred: " << e.what() << std::endl;
         }
     }
-
-private:
-    const std::string greenCircle = "\033[32m●\033[0m";
-    const std::string redCircle = "\033[31m●\033[0m"; 
 };
 
 ////////////////////////////////////////////
@@ -1043,8 +1042,13 @@ int main()
 
 /*
 TODO:
-    - do up some nice docs
-        - give a chance to re-understand how all works
+    - update stats on PUT and DEL
+    - find nice abstraction for endpoints
+    - generally fix up .then logic
+        - not really async sometimes
+        - may have expensive unintended copies when capturing
+          by value
+    - do up Master and Storage docs
     - handle hash collisions
         - in BAT AND on hash ring
     - user should receive actual error messages
@@ -1059,7 +1063,7 @@ TODO:
             - don't want all 3 of block0 on node0, all 3 of block1 on node1 etc
             - pretty sure this isn't the case, but want  to make sure
     - indexation for store file (currently O(N) searching through all BAT entries)
-    - understand and internalise CAP
+    - understand and internalise CAP and how it applies here
     - implement concurrent r/w protections for DiskStorage
         - see bottom of server.cpp for plan
     - make .then() code non-blocking (related to concurrent r/w)
@@ -1070,8 +1074,6 @@ bugs:
         - potentially have some testing where thrash it with requests
     - when num healthy nodes < R, should throw an error (doesn't right now),
         just returns junk output
-    - get /stats status column to print out the green and red circle
-        - requires ignoring escape characters when calculating text size
 
 potentially:
     - each request should have an output stream that you print
@@ -1087,26 +1089,9 @@ potentially:
     - if writing out more nodes in docker-compose.yml gets annoying, 
         write python script to generate one (probs makes stuff just less clear though)
 
-ADDING / REMOVING NODES PLAN:
-    - want to NOTIFY MasterServer of a new node in via an authenticated API call
-    - real challenge is re-allocation
-    - also need to figure out how actually tell MasterServer
-        that another storage server exists
-    - we can easily spin up another storage server
-        - but do we manually set its ID?
-        - we ideally want to do this quickly and in an automated fashion
-    - plan: 
-        - /register-node:POST endpoint
-        - authenticated by an API key / token
-        - gives ip:port and nodeId
-        - then, MasterServer performs the re-balancing
-            - how to deal with the downtime of this? (see CAP)
-
 MASTER RESTARTING:
-    - either:
-        - persist master's critical state to disk
-            - simple, small format
-        - completely re-build by querying storage nodes
-
-
+    - persist current storage nodes
+    - for each node, query /sync endpoint
+    - need:
+        - each key and its block numbers
 */

@@ -148,8 +148,13 @@ public:
 
         task.wait();
 
+        std::vector<unsigned char> responseBuffer = createSizeResponseBuffer();
+
         // send success response
-        request.reply(status_codes::OK);
+        http_response response;
+        response.set_status_code(status_codes::OK);
+        response.set_body(responseBuffer);
+        request.reply(response);
         return;
     }
     
@@ -169,8 +174,13 @@ public:
             request.reply(status_codes::InternalError);
         }
 
+        std::vector<unsigned char> responseBuffer = createSizeResponseBuffer();
+
         // send success response
-        request.reply(status_codes::OK);
+        http_response response;
+        response.set_status_code(status_codes::OK);
+        response.set_body(responseBuffer);
+        request.reply(response);
         return;
     }
 
@@ -189,12 +199,7 @@ public:
         return;
     }
 
-    /**
-     * Reponds to master server's request for this nodes stats, namely:
-     *      - num. bytes of data section used
-     *      - total size (in bytes) of data section
-     */
-    void statsHandler(http_request request)
+    std::vector<unsigned char> createSizeResponseBuffer()
     {
         std::vector<unsigned char> responseBuffer;
 
@@ -211,6 +216,18 @@ public:
             reinterpret_cast<unsigned char*>(&dataTotalSize),
             reinterpret_cast<unsigned char*>(&dataTotalSize) + sizeof(dataTotalSize)
         );
+
+        return responseBuffer;
+    }
+
+    /**
+     * Reponds to master server's request for this nodes stats, namely:
+     *      - num. bytes of data section used
+     *      - total size (in bytes) of data section
+     */
+    void statsHandler(http_request request)
+    {
+        std::vector<unsigned char> responseBuffer = createSizeResponseBuffer();
 
         http_response response;
         response.set_status_code(status_codes::OK);

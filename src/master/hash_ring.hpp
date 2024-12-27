@@ -15,9 +15,12 @@ class VirtualNode
 {
 public:
     /**
-     * Unique id of the form: ip:virtualNodeNum.
+     * Unique id of the form: `[ip_port]:[virtual_node_num]`, where:
      * 
-     * Used as hash input to determine position on the ring.
+     *      ip_port - ip:port combo of corresponding physical node
+     *      virtual_node_num - number of this virtual node
+     * 
+     * This serves as the hash input to determine its position on the ring.
      */
     std::string id;
 
