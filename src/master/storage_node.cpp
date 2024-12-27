@@ -8,12 +8,12 @@
 /**
  * Create all virtual nodes. 
  */
-void StorageNode::createVirtualNodes()
+void StorageNode::createVirtualNodes(int numVirtualNodes)
 {
-    this->virtualNodes = std::vector<std::shared_ptr<VirtualNode>>(this->numVirtualNodes);
+    virtualNodes = std::vector<std::shared_ptr<VirtualNode>>(numVirtualNodes);
 
     std::string virtualNodeId;
-    for (int i = 0; i < this->numVirtualNodes; i++) 
+    for (int i = 0; i < numVirtualNodes; i++) 
     {
         virtualNodeId = this->ipPort + ":" + std::to_string(i);
 
@@ -26,9 +26,9 @@ void StorageNode::createVirtualNodes()
 StorageNode::StorageNode(std::string ipPort, int numVirtualNodes)
     : id(idGenerator++),
       ipPort(ipPort),
-      numVirtualNodes(numVirtualNodes)
+      isHealthy(false)
 {
-    createVirtualNodes();
+    createVirtualNodes(numVirtualNodes);
 }
 
 std::string StorageNode::toString()

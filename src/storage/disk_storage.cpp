@@ -447,9 +447,25 @@ void DiskStorage::deleteBlocks(std::string key)
 }
 
 /**
+ * Returns #bytes used of data section
+ */
+uint32_t DiskStorage::dataUsedSize()
+{
+    uint32_t usedSize = 0;
+    for (auto &be : this->bat.table)
+        usedSize += be.numBytes;
+    return usedSize;
+}
+
+uint32_t DiskStorage::dataTotalSize()
+{
+    return this->header.maxDataSize;
+}
+
+/**
  * Returns total size (in bytes) of the store file.
  */
-uint32_t DiskStorage::getTotalFileSize()
+uint32_t DiskStorage::totalFileSize()
 {
     return sizeof(this->header) + this->header.batSize + this->header.maxDataSize;
 }
@@ -520,14 +536,12 @@ void DiskStorage::createStoreFile()
     // create file
     this->storeFile = std::fstream(this->storeFilePath, 
         std::fstream::in | std::fstream::out | std::fstream::trunc | std::fstream::binary);
-    
-    std::cout << this->storeFilePath << std::endl;
 
     if (!this->storeFile.is_open())
         throw std::runtime_error("couldn't create store file");
 
     // write to max byte
-    uint32_t totalFileSize = this->getTotalFileSize();
+    uint32_t totalFileSize = this->totalFileSize();
     this->storeFile.seekp(totalFileSize - 1);
     this->storeFile.put(0);
     this->storeFile.flush();

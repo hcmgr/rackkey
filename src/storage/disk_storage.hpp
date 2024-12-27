@@ -162,9 +162,19 @@ public:
     std::vector<unsigned char> readRawDiskBlocks(uint32_t startingDiskBlockNum, uint32_t N);
 
     /**
+     * Returns num. bytes used of data section
+     */
+    uint32_t dataUsedSize();
+
+    /**
+     * Returns total size (in bytes) of the data section
+     */
+    uint32_t dataTotalSize();
+
+    /**
      * Returns total size (in bytes) of the store file.
      */
-    uint32_t getTotalFileSize();
+    uint32_t totalFileSize();
 
     /**
      * Returns offset of disk block `diskBlockNum`.

@@ -24,7 +24,7 @@ public:
     uint32_t healthCheckPeriodMs;
 
     /**
-     * Number of virtual hash ring nodes created for each physical node
+     * Number of virtual hash ring nodes created for each storage node
      */
     uint32_t numVirtualNodes;
 

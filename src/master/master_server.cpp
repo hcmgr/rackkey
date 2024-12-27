@@ -8,6 +8,9 @@
 #include <chrono>
 #include <thread>
 #include <mutex>
+#include <regex>
+#include <locale>
+#include <codecvt>
 
 #include "storage_node.hpp"
 #include "hash_ring.hpp"
@@ -35,8 +38,6 @@ public:
      * 
      * i.e. for each KEY, we store a mapping from block number to a list of storage node ids.
      * 
-     * Allows for fast lookup of block location.
-     * 
      * NOTE: 
      * 
      * Nicknamed the 'KBN' for brevity.
@@ -46,9 +47,10 @@ public:
     /**
      * Stores our storage nodes.
      * 
-     * Mapping is of the form: storage node id -> StorageNode object.
+     * Mapping is of the form: { storage node id -> StorageNode object }.
      */
     std::map<uint32_t, std::shared_ptr<StorageNode>> storageNodes;
+
 
     /**
      * Stores currently open connections to storage nodes.
@@ -213,13 +215,6 @@ public:
             // wait on all request tasks - we're on a separate thread so this won't hurt
             auto task = pplx::when_all(healthCheckTasks.begin(), healthCheckTasks.end());
             task.wait();
-
-            bool reporting = false; // TODO : make an #ifdef thing
-            if (reporting)
-            {
-                std::cout << std::endl << "Storage node health: " << std::endl;
-                PrintUtils::printMap(this->nodeHealthMap);
-            }
         }
     }
 
@@ -519,12 +514,12 @@ public:
                 uint32_t R = std::min(this->config.replicationFactor, this->config.numStorageNodes);
 
                 /**
-                 * Find next R (replication factor) distinct physical nodes and 
+                 * Find next R (replication factor) distinct storage nodes and 
                  * add the block to the nodes' block list.
                  */
                 std::string hashInput = key + std::to_string(blockNum);
                 uint32_t hash = Crypto::sha256_32(hashInput);
-                std::unordered_set<uint32_t> usedPhysicalNodes;
+                std::unordered_set<uint32_t> usedStorageNodes;
                 int cnt = 0;
 
                 while (cnt < R)
@@ -533,12 +528,12 @@ public:
                     uint32_t nodeId = vn->physicalNodeId;
 
                     if (
-                        usedPhysicalNodes.find(nodeId) == usedPhysicalNodes.end() &&    // node is un-used by block
-                        this->nodeHealthMap[nodeId]     // node is healthy
+                        usedStorageNodes.find(nodeId) == usedStorageNodes.end() &&  // node is un-used by block
+                        this->nodeHealthMap[nodeId]  // node is healthy
                        )
                     {
                         nodeBlockMap[nodeId].push_back(block);
-                        usedPhysicalNodes.insert(nodeId);
+                        usedStorageNodes.insert(nodeId);
                         cnt++;
                     }
 
@@ -588,7 +583,7 @@ public:
         if (!success)
             return;
 
-        // calculateAndShowBlockDistribution(key);
+        calculateAndShowBlockDistribution(key);
 
         // timing point: end
         auto end = std::chrono::high_resolution_clock::now();
@@ -623,7 +618,8 @@ public:
             if (response.status_code() != status_codes::OK)
             {
                 throw std::runtime_error(
-                    "deleteBlocks() failed with status: " + std::to_string(response.status_code()));
+                    "deleteBlocks() failed with status: " + std::to_string(response.status_code())
+                );
             }
         });
 
@@ -724,6 +720,143 @@ public:
         request.reply(status_codes::OK, oss.str());
     }
 
+    std::string centerText(std::string text, int width) {
+        size_t size = text.size(); 
+
+        if (size > static_cast<size_t>(width)) 
+            return text.substr(0, width);
+
+        int padding = (width - size) / 2;
+        int extra = (width - size) % 2; // handle odd padding
+        return std::string(padding, ' ') + text + std::string(padding + extra, ' ');
+    }
+
+    std::ostringstream displayStats()
+    {
+        std::ostringstream oss;
+
+        const int numColumns = 6;
+        const int columnWidth = 15;
+        std::string divider(columnWidth, '-');
+
+        // top divider
+        for (int i = 0; i < numColumns; i++)
+        {
+            oss << divider << "-";
+            if (i == numColumns - 1)
+                oss << "-";
+        }
+        oss << "\n";
+
+        // header row
+        oss << "|" << centerText("node", columnWidth)
+            << "|" << centerText("status", columnWidth)
+            << "|" << centerText("#blocks", columnWidth)
+            << "|" << centerText("used (bytes)", columnWidth)
+            << "|" << centerText("free (bytes)", columnWidth)
+            << "|" << centerText("total (bytes)", columnWidth)
+            << "|"
+            << "\n";
+        
+        // middle divider 
+        for (int i = 0; i < numColumns; i++)
+        {
+            oss << "|" << divider;
+            if (i == numColumns - 1)
+                oss << "|";
+        }
+
+        oss << "\n";
+        
+        // print each node row
+        for (auto &p : this->storageNodes)
+        {
+            uint32_t nodeId = p.first;
+            std::shared_ptr<StorageNode> sn = p.second;
+
+            StorageNodeStats nodeStats = sn->stats;
+
+            std::string nodeText = std::to_string(nodeId);
+            std::string nodeStatusText = sn->isHealthy ? "(running)" : "(down)";
+            std::string nodeNumBlocksText = std::to_string(nodeStats.blocksStored);
+            std::string nodeFreeSizeText = std::to_string(nodeStats.dataBytesUsed);
+            std::string nodeUsedSizeText = std::to_string(nodeStats.dataBytesFree);
+            std::string nodeTotalSizeText = std::to_string(nodeStats.dataBytesTotal);
+
+            oss << "|" << centerText(nodeText, columnWidth)            
+                << "|" << centerText(nodeStatusText, columnWidth)     
+                << "|" << centerText(nodeNumBlocksText, columnWidth) 
+                << "|" << centerText(nodeFreeSizeText, columnWidth)  
+                << "|" << centerText(nodeUsedSizeText, columnWidth) 
+                << "|" << centerText(nodeTotalSizeText, columnWidth) 
+                << "|"
+                << "\n";
+        }
+
+        // bottom divider
+        for (int i = 0; i < numColumns; i++)
+        {
+            oss << divider << "-";
+            if (i == numColumns - 1)
+                oss << "-";
+        }
+
+        oss << "\n";
+
+        return oss;
+    }
+
+    /**
+     * Retreive used space, free space and total size (all in bytes)
+     * from node `storageNodeId`, and populate the given stat maps.
+     */
+    pplx::task<void> getNodeStats(uint32_t storageNodeId)
+    {
+        std::shared_ptr<StorageNode> sn = this->storageNodes[storageNodeId];
+        auto client = getHttpClient(sn);
+
+        // build and send request
+        http_request request = http_request();
+        request.set_method(methods::GET);
+        request.set_request_uri(U("/stats"));
+
+        auto task = client->request(request)
+        .then([&](http_response response)
+        {
+            if (response.status_code() != status_codes::OK)
+            {
+                throw std::runtime_error(
+                    "getNodeStats() failed with status: " + std::to_string(response.status_code())
+                );
+            }
+
+            return response.extract_vector();
+        })
+        
+        .then([=](std::vector<unsigned char> payload)
+        {
+            uint32_t dataUsedSize;
+            uint32_t dataTotalSize;
+            uint32_t dataFreeSize;
+
+            auto it = payload.begin();
+
+            std::memcpy(&dataUsedSize, &(*it), sizeof(dataUsedSize));
+            it += sizeof(dataUsedSize);
+            std::memcpy(&dataTotalSize, &(*it), sizeof(dataTotalSize));
+            it += sizeof(dataTotalSize);
+
+            assert(it == payload.end());
+            dataFreeSize = dataTotalSize - dataUsedSize;
+
+            sn->stats.dataBytesUsed = dataUsedSize;
+            sn->stats.dataBytesFree = dataFreeSize;
+            sn->stats.dataBytesTotal = dataTotalSize;
+        });
+
+        return task;
+    }
+
     /**
      * /stats:GET
      * ---
@@ -731,13 +864,49 @@ public:
      * i.e. #blocks, #keys, space used, space free, total size, etc.
      * 
      * TODO:
+     * 
+     * cache stats, update each time we write
      */
     void getStatsHandler(http_request request)
     {
         std::cout << "GET /stats req received" << std::endl;
-        std::ostringstream oss;
-        oss << config.numStorageNodes << "\n";
 
+        /**
+         * Collect stats
+         */
+        std::map<uint32_t, bool> nodeStatus; // { node id -> isHealthy }
+        for (auto &p : this->storageNodes)
+            nodeStatus[p.first] = this->nodeHealthMap[p.first];
+
+        std::map<uint32_t, uint32_t> nodeNumBlocks; // { node id -> #blocks }
+        for (auto &p : this->keyBlockNodeListMap)
+        {
+            std::map<uint32_t, std::vector<uint32_t>> &blockNodeListMap = *(p.second);
+            for (auto &q : blockNodeListMap)
+            {
+                std::vector<uint32_t> &nodes = q.second;
+                for (auto &nodeId : nodes)
+                {
+                    if (nodeNumBlocks.find(nodeId) == nodeNumBlocks.end())
+                        nodeNumBlocks[nodeId] = 0;
+                    nodeNumBlocks[nodeId]++;
+                }
+            }
+        }
+
+        std::vector<pplx::task<void>> getStatsTasks;
+        for (auto &p : this->storageNodes)
+        {
+            uint32_t nodeId = p.first;
+
+            auto task = getNodeStats(p.first);
+            getStatsTasks.push_back(task);
+        }
+    
+        auto task = pplx::when_all(getStatsTasks.begin(), getStatsTasks.end());
+        task.wait();
+
+        std::ostringstream oss = displayStats();
         request.reply(status_codes::OK, oss.str());
     }
 
@@ -800,6 +969,10 @@ public:
             std::cout << "An error occurred: " << e.what() << std::endl;
         }
     }
+
+private:
+    const std::string greenCircle = "\033[32m●\033[0m";
+    const std::string redCircle = "\033[31m●\033[0m"; 
 };
 
 ////////////////////////////////////////////
@@ -875,11 +1048,6 @@ TODO:
     - handle hash collisions
         - in BAT AND on hash ring
     - user should receive actual error messages
-    - /stats endpoint that reports 
-      num blocks stored / bytes used / max size / free
-      for each storage node
-        - really want to make sure the files aren't just growing
-        - just stress test it with a bunch of crap and see if it grows / buckles
     - master restarting
         - i.e. minimal master persistence to rebuild from shutdown / reboot
     - adding / removing nodes / rebalancing
@@ -902,6 +1070,8 @@ bugs:
         - potentially have some testing where thrash it with requests
     - when num healthy nodes < R, should throw an error (doesn't right now),
         just returns junk output
+    - get /stats status column to print out the green and red circle
+        - requires ignoring escape characters when calculating text size
 
 potentially:
     - each request should have an output stream that you print
@@ -916,26 +1086,6 @@ potentially:
         - token or generated API key
     - if writing out more nodes in docker-compose.yml gets annoying, 
         write python script to generate one (probs makes stuff just less clear though)
-
-WITH REPLICATION PLAN:
-    GET:
-        - KBN: { key -> {blockNum -> nodeIdList} }
-            - nodeIdList.size() == R, where R is our replication factor
-        - for each block, greedily pick first 'healthy' node (as per latest health check)
-        - build up {nodeId -> blockNumList}
-            - so can query node's blocks in one request
-        - send storage a GET, with blockNumList as payload
-            - storage node will obviously read all `key`s blocks
-            - will just return those it was asked for
-    
-    WRITE:
-        - for each block:
-            - hash(key + blockNum) -> R nodes to store on
-            - i.e. KBN[key][blockNum] = {node0, node1, ... nodeR}
-        - {blockNum -> nodeList} map to build up {nodeId -> blockNumList} map
-        - for each nodeId:
-            - build up vector<Block> blocks
-            - call sendBlocks(nodeId, key, blocks)
 
 ADDING / REMOVING NODES PLAN:
     - want to NOTIFY MasterServer of a new node in via an authenticated API call
@@ -957,4 +1107,6 @@ MASTER RESTARTING:
         - persist master's critical state to disk
             - simple, small format
         - completely re-build by querying storage nodes
+
+
 */

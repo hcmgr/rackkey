@@ -190,6 +190,36 @@ public:
     }
 
     /**
+     * Reponds to master server's request for this nodes stats, namely:
+     *      - num. bytes of data section used
+     *      - total size (in bytes) of data section
+     */
+    void statsHandler(http_request request)
+    {
+        std::vector<unsigned char> responseBuffer;
+
+        uint32_t dataUsedSize = this->diskStorage->dataUsedSize();
+        uint32_t dataTotalSize = this->diskStorage->dataTotalSize();
+
+        responseBuffer.insert(
+            responseBuffer.end(), 
+            reinterpret_cast<unsigned char*>(&dataUsedSize),
+            reinterpret_cast<unsigned char*>(&dataUsedSize) + sizeof(dataUsedSize)
+        );
+        responseBuffer.insert(
+            responseBuffer.end(), 
+            reinterpret_cast<unsigned char*>(&dataTotalSize),
+            reinterpret_cast<unsigned char*>(&dataTotalSize) + sizeof(dataTotalSize)
+        );
+
+        http_response response;
+        response.set_status_code(status_codes::OK);
+        response.set_body(responseBuffer);
+        request.reply(response);
+        return;
+    }
+
+    /**
      * Retreives node's unique id via the environment variable `NODE_ID`.
      */
     int getNodeIDFromEnv() {
@@ -235,6 +265,11 @@ public:
         {
             if (request.method() == methods::GET)
                 this->healthCheckHandler(request);
+        }
+        else if (endpoint == U("/stats"))
+        {
+            if (request.method() == methods::GET)
+                this->statsHandler(request);
         }
         else 
         {

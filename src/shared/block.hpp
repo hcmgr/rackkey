@@ -87,24 +87,6 @@ public:
     );
 };
 
-// namespace BlockUtils
-// {
-//     /**
-//      * Generate `N` blocks with total data size `numBytes`, each with
-//      * key `key`.
-//      * 
-//      * Returns pair of the form {block list, block numbers}
-//      * 
-//      * NOTE: used to write tests for Block and other modules.
-//      */
-//     std::pair<std::vector<Block>, std::unordered_set<uint32_t>> generateRandom(
-//         std::string key, 
-//         uint32_t blockSize,
-//         uint32_t numBytes,
-//         std::vector<std::vector<unsigned char>> &dataBuffers
-//     );
-// };
-
 namespace BlockTests
 {
     void testBlockSerializeDeserialize();
