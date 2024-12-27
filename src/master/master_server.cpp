@@ -434,7 +434,6 @@ public:
 
                 // assign each block to node `storageNodeId`
                 for (auto &block : blocks)
-                    // (*blockNodeMap)[block.blockNum].push_back(storageNodeId);
                     (*blockNodeMap)[block.blockNum].insert(storageNodeId);
                 
                 return response.extract_vector();
@@ -442,23 +441,10 @@ public:
 
             .then([=](std::vector<unsigned char> payload)
             {
-                // if overriding existing blocks, subtract their stats contribution
-                if (this->keyBlockNodeMap.find(key) != this->keyBlockNodeMap.end())
-                {
-                    uint32_t existingBlocks = 0;
-                    for (auto &p : *(this->keyBlockNodeMap[key]))
-                    {
-                        if (std::find(p.second.begin(), p.second.end(), storageNodeId) != p.second.end())
-                            existingBlocks++;
-                    }
-                    sn->stats.blocksStored -= existingBlocks;
-                }
-
                 // update node's stats
                 uint32_t blocksAdded = blocks.size();
-                sn->stats.blocksStored += blocksAdded;
-
-                updateNodeSizesFromSizesResponse(sn, payload);
+                updateNodesBlockCount(sn, key, blocksAdded);
+                updateNodesDataSizes(sn, payload);
             });
 
         return task;
@@ -635,9 +621,8 @@ public:
         {
             // update node's stats
             uint32_t blocksAdded = this->keyBlockNodeMap[key]->size();
-            sn->stats.blocksStored += blocksAdded;
-
-            updateNodeSizesFromSizesResponse(sn, payload);
+            updateNodesBlockCount(sn, key, blocksAdded);
+            updateNodesDataSizes(sn, payload);
         });
 
         return task;
@@ -737,7 +722,31 @@ public:
         request.reply(status_codes::OK, oss.str());
     }
 
-    void updateNodeSizesFromSizesResponse(
+    void updateNodesBlockCount(
+        std::shared_ptr<StorageNode> sn,
+        std::string key,
+        uint32_t blocksAdded
+    )
+    {
+        // if removing existing blocks, subtract their stats contribution
+        if (this->keyBlockNodeMap.find(key) != this->keyBlockNodeMap.end())
+        {
+            uint32_t existingBlocks = 0;
+
+            for (auto &blockNodesPair : *(this->keyBlockNodeMap[key]))
+            {
+                std::set<uint32_t> &nodeIds = blockNodesPair.second;
+                if (nodeIds.find(sn->id) != nodeIds.end())
+                    existingBlocks++;
+            }
+
+            sn->stats.blocksStored -= existingBlocks;
+        }
+
+        sn->stats.blocksStored += blocksAdded;
+    }
+    
+    void updateNodesDataSizes(
         std::shared_ptr<StorageNode> sn,
         std::vector<unsigned char> &responseBuffer)
     {
