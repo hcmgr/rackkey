@@ -8,7 +8,7 @@
  * Represents a data transmission block.
  * 
  * Data is sent/received to/from the storage cluster
- * as lists of Block objects.
+ * as a list of Block objects.
  * 
  * NOTE:
  * 

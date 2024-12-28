@@ -221,61 +221,6 @@ std::pair<std::vector<Block>, std::unordered_set<uint32_t>> Block::generateRando
 }
 
 ////////////////////////////////////////////
-// Block utils
-////////////////////////////////////////////
-
-// namespace BlockUtils
-// {
-//     /**
-//      * Generate `N` blocks with total data size `numBytes`, each with
-//      * key `key`.
-//      * 
-//      * Returns pair of the form {block list, block numbers}
-//      * 
-//      * NOTE: used to write tests for Block and other modules.
-//      */
-//     std::pair<std::vector<Block>, std::unordered_set<uint32_t>> generateRandom(
-//         std::string key, 
-//         uint32_t blockSize,
-//         uint32_t numBytes,
-//         std::vector<std::vector<unsigned char>> &dataBuffers
-//     )
-//     {
-//         std::vector<Block> blocks;
-//         std::unordered_set<uint32_t> blockNums;
-
-//         // create random data for blocks - upper case letters
-//         std::random_device rd;
-//         std::mt19937 gen(rd());
-//         std::uniform_int_distribution<> dis(65, 90);
-
-//         uint32_t blockNum = 0;
-//         for (uint32_t pos = 0; pos < numBytes; pos += blockSize) {
-//             size_t bufferSize = std::min(blockSize, numBytes - pos);
-//             dataBuffers.emplace_back(bufferSize);
-
-//             // Fill the buffer with random data
-//             for (size_t j = 0; j < bufferSize; j++) {
-//                 dataBuffers.back()[j] = static_cast<unsigned char>(dis(gen));
-//             }
-
-//             // Create a block with the random data
-//             blocks.emplace_back(
-//                 key,
-//                 blockNum,
-//                 dataBuffers.back().size(),
-//                 dataBuffers.back().begin(),
-//                 dataBuffers.back().end()
-//             );
-
-//             blockNums.insert(blockNum++);
-//         }
-
-//         return {blocks, blockNums};
-//     }
-// }
-
-////////////////////////////////////////////
 // Block tests
 ////////////////////////////////////////////
 namespace BlockTests

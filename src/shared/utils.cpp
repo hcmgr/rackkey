@@ -8,6 +8,7 @@
 #include <filesystem>
 
 #include "utils.hpp"
+#include "test_utils.hpp"
 
 using namespace web;
 using namespace web::http;
@@ -145,3 +146,50 @@ namespace FileSystemUtils
             fs::remove_all(dirPath);
     }
 }
+
+////////////////////////////////////////////
+// Utils tests
+////////////////////////////////////////////
+namespace UtilsTests
+{
+    void testParsePath()
+    {
+        std::vector<std::string> paths = {
+            "/store/archive.zip",
+            "/store/archive.zip/",
+
+            "/keys",
+            "/keys/"
+        };
+
+        std::vector<std::pair<std::string, std::string>> expectedParsedPaths = {
+            {"/store", "archive.zip"},
+            {"/store", "archive.zip"},
+
+            {"/keys", ""},
+            {"/keys", ""}
+        };
+
+        for (int i = 0; i < paths.size(); i++)
+        {
+            auto p = ApiUtils::parsePath(paths[i]);
+            ASSERT_THAT(p == expectedParsedPaths[i]);
+        }
+    }
+
+    void runAll()
+    {
+        std::cerr << "###################################" << std::endl;
+        std::cerr << "Utils Tests" << std::endl;
+        std::cerr << "###################################" << std::endl;
+
+        std::vector<std::pair<std::string, std::function<void()>>> tests = {
+            TEST(testParsePath)
+        };
+
+        for (auto &[name, func] : tests)
+        {
+            TestUtils::runTest(name, func);
+        }
+    }
+};

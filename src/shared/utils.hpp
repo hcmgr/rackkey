@@ -126,3 +126,12 @@ namespace FileSystemUtils
      */
     void removeDirectory(fs::path dirPath);
 }
+
+////////////////////////////////////////////
+// Utils tests
+////////////////////////////////////////////
+namespace UtilsTests
+{
+    void testParsePath();
+    void runAll();
+}

@@ -969,56 +969,6 @@ public:
 };
 
 ////////////////////////////////////////////
-// MasterServer tests
-////////////////////////////////////////////
-
-namespace MasterServerTests {
-    void testParsePath()
-    {
-        MasterServer ms("../config.json");
-
-        std::vector<std::string> paths = {
-            "/store/archive.zip",
-            "/store/archive.zip/",
-
-            "/keys",
-            "/keys/"
-        };
-
-        std::vector<std::pair<std::string, std::string>> expectedParsedPaths = {
-            {"/store", "archive.zip"},
-            {"/store", "archive.zip"},
-
-            {"/keys", ""},
-            {"/keys", ""}
-        };
-
-        for (int i = 0; i < paths.size(); i++)
-        {
-            auto p = ApiUtils::parsePath(paths[i]);
-            ASSERT_THAT(p == expectedParsedPaths[i]);
-        }
-    }
-
-    void runAll()
-    {
-        std::cerr << "###################################" << std::endl;
-        std::cerr << "MasterServer Tests" << std::endl;
-        std::cerr << "###################################" << std::endl;
-
-        std::vector<std::pair<std::string, std::function<void()>>> tests = {
-            TEST(testParsePath)
-        };
-
-        for (auto &[name, func] : tests)
-        {
-            TestUtils::runTest(name, func);
-        }
-    }
-};
-
-
-////////////////////////////////////////////
 // Run
 ////////////////////////////////////////////
 
@@ -1037,7 +987,6 @@ int main()
 /*
 TODO:
     - fix 'no delete' bug
-    - find nice abstraction for endpoints
     - master restarting
         - i.e. minimal master persistence to rebuild from shutdown / reboot
         - /sync endpoint on storage server that master hits on start for each server
@@ -1071,18 +1020,19 @@ bugs:
         just returns junk output
 
 potentially:
+    - separate endpoint inner classes just into own files
     - each request should have an output stream that you print
       at the end of the request (i.e. a logger)
         - i.e. endpoint, request type, time taken, other info, etc.
         - NOTE: build up throughout and print synchronously at the end
           to avoid multi-threaded-printing-weirdness
-    - separate out each endpoint and their handlers into nice abstraction:
-        - nested class, etc.
     - way to run all tests with one command
     - authenticate requests from master -> server
         - token or generated API key
     - if writing out more nodes in docker-compose.yml gets annoying, 
         write python script to generate one (probs makes stuff just less clear though)
+    - official master server testing
+        - mocking endpoints?
 
 MASTER RESTARTING:
     - persist current storage nodes
