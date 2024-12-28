@@ -52,7 +52,6 @@ public:
      */
     std::map<uint32_t, std::shared_ptr<StorageNode>> storageNodes;
 
-
     /**
      * Stores currently open connections to storage nodes.
      * 
@@ -72,55 +71,661 @@ public:
         addInitialStorageNodes();
     }
 
-    ~MasterServer() 
-    {
-
-    }
+    ~MasterServer() {}
 
     /**
-     * Calculates and displays the distribution of the given `key`s blocks
-     * across the storage nodes.
+     * Contains all handlers for our /store endpoint
      */
-    void calculateAndShowBlockDistribution(std::string key) 
+    class StoreEndpoint
     {
-        std::map<uint32_t, uint32_t> nodeBlockCounts; // node id -> block count
-        
-        std::map<uint32_t, std::set<uint32_t>> blockNodeMap = *(this->keyBlockNodeMap[key]);
-        uint32_t totalNumBlocks = blockNodeMap.size();
-        uint32_t totalNumReplicatedBlocks = 0;
+    private:
+        MasterServer *server;
+    
+    public:
+        explicit StoreEndpoint(MasterServer *server) : server(server) {}
 
-        for (auto p: blockNodeMap)
+        /**
+         * /store/{KEY}: GET
+         * ---
+         * Requests all of {KEY}'s blocks from the storage cluster
+         * and returns them in order.
+         */
+        void getHandler(http_request request, const std::string key) 
         {
-            uint32_t blockNum = p.first; 
-            std::set<uint32_t> nodeIds = p.second;
+            std::cout << "GET req received: " << key << std::endl;
 
-            for (auto nodeId : nodeIds)
+            // timing point: start
+            auto start = std::chrono::high_resolution_clock::now();
+
+            // check key exists
+            if (server->keyBlockNodeMap.find(key) == server->keyBlockNodeMap.end())
             {
-                if (nodeBlockCounts.find(nodeId) == nodeBlockCounts.end())
-                    nodeBlockCounts[nodeId] = 0;
-                nodeBlockCounts[nodeId]++;
-                totalNumReplicatedBlocks++;
+                std::cout << "GET: failed - key doesn't exist" << std::endl;
+                request.reply(status_codes::InternalError);
+                return;
             }
+
+            std::shared_ptr<std::map<uint32_t, std::set<uint32_t>>> blockNodeMap = server->keyBlockNodeMap[key];
+            
+            /**
+             * For each block, we chose the first healthy storage node that
+             * stores it.
+             * 
+             * We store our 'choices' in nodeBlockMap, which is a mapping
+             * of the form: {node id -> block num list}.
+             */
+            std::unordered_map<uint32_t, std::vector<uint32_t>> nodeBlockMap;
+            for (auto p : *(blockNodeMap))        
+            {
+                uint32_t blockNum = p.first;
+                std::set<uint32_t> nodeIds = p.second;
+
+                bool foundHealthy = false;
+                for (auto nodeId : nodeIds)
+                {
+                    std::shared_ptr<StorageNode> sn = server->storageNodes[nodeId];
+                    if (sn->isHealthy)
+                    {
+                        nodeBlockMap[nodeId].push_back(blockNum);
+                        foundHealthy = true;
+                        break;
+                    }
+                }
+
+                if (!foundHealthy)
+                    throw std::runtime_error("Error: no healthy nodes available for block " + std::to_string(blockNum));
+            }
+
+            // mapping of the form: {block num. -> block object}
+            auto blockMap = std::make_shared<std::map<uint32_t, Block>>();
+
+            std::vector<std::shared_ptr<std::vector<unsigned char>>> responsePayloads;
+            
+            /**
+             * Call `getBlocks` for each node and wait on all tasks 
+             * to finish.
+             */
+            std::vector<pplx::task<void>> getBlockTasks;
+            for (auto p : nodeBlockMap)
+            {
+                uint32_t nodeId = p.first;
+                std::vector<uint32_t> blockNums = p.second;
+
+                auto responsePayload = std::make_shared<std::vector<unsigned char>>();
+                responsePayloads.push_back(responsePayload);
+
+                auto task = getBlocks(nodeId, key, blockNums, blockMap, responsePayload);
+                getBlockTasks.push_back(task);
+            }
+
+            bool success = true;
+            auto task = pplx::when_all(getBlockTasks.begin(), getBlockTasks.end())
+            .then([&request, &success](pplx::task<void> allTasks)
+            {
+                try 
+                {
+                    allTasks.get();
+                }
+                catch (const std::exception& e)
+                {
+                    std::cout << "GET: failed - " << e.what() << std::endl;
+                    success = false;
+
+                    request.reply(status_codes::InternalError);
+                }
+            });
+
+            task.wait();
+
+            if (!success)
+                return;
+
+            // recombine blocks in order
+            std::vector<unsigned char> payloadBuffer;
+            for (auto p : *(blockMap))
+            {
+                Block block = p.second;
+                payloadBuffer.insert(payloadBuffer.end(), block.dataStart, block.dataEnd);
+            }
+
+            // timing point: end
+            auto end = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+            std::cout << "Total Time: " << duration.count() << " ms" << std::endl;
+
+            std::cout << "GET: successful" << std::endl;
+
+            // send success response
+            http_response response(status_codes::OK);
+            response.set_body(payloadBuffer);
+            request.reply(response);
+            return;
         }
 
-        std::ostringstream oss;
+        /**
+         * Retreives blocks `blockNums` for key `key` from node `storageNodeId`.
+         * 
+         * NOTE:
+         * 
+         * `blockMap` is populated by this function (see getHandler() below).
+         */
+        pplx::task<void> getBlocks(
+            uint32_t storageNodeId,
+            std::string key,
+            std::vector<uint32_t> blockNums,
+            std::shared_ptr<std::map<uint32_t, Block>> blockMap,
+            std::shared_ptr<std::vector<unsigned char>> responsePayload
+        )
+        {
+            std::shared_ptr<StorageNode> sn = server->storageNodes[storageNodeId];
 
-        oss << "\n";
-        oss << "-------------------\n";
-        oss << "key: " << key << "\n";
-        oss << "unique blocks: " << totalNumBlocks << "\n";
-        oss << "total blocks (including replicas): " << totalNumReplicatedBlocks << "\n";
-        oss << "block distribution:\n";
-        oss << "{\n";
-        for (const auto& [nodeId, blockCount] : nodeBlockCounts) {
-            oss << "  " << nodeId << ": " << blockCount << "\n";
+            auto client = server->getHttpClient(sn);
+
+            /**
+             * Serialise block numbers to send as payload.
+             */
+            std::vector<unsigned char> requestPayload;
+            for (uint32_t bn : blockNums)
+            {
+                requestPayload.insert(
+                    requestPayload.end(),
+                    reinterpret_cast<unsigned char*>(&bn),
+                    reinterpret_cast<unsigned char*>(&bn) + sizeof(bn)
+                );
+            }
+
+            // build and send request
+            http_request req = http_request();
+            req.set_method(methods::GET);
+            req.set_request_uri(U("/store/" + key));
+            req.set_body(requestPayload);
+
+            return client->request(req)
+            .then([=](http_response response)
+            {
+                if (response.status_code() != status_codes::OK)
+                {
+                    throw std::runtime_error(
+                        "getBlocks() failed with status: " + std::to_string(response.status_code()));
+                }
+                return response.extract_vector();
+            })
+
+            // deserialise payload and populate block map
+            .then([=](std::vector<unsigned char> payload)
+            {
+                *responsePayload = payload;
+                std::vector<Block> blocks = Block::deserialize(*(responsePayload));
+                for (auto block : blocks)
+                {
+                    blockMap->insert({block.blockNum, std::move(block)});
+                }
+            });
         }
-        oss << "}\n";
-        oss << "-------------------\n";
-        oss << "\n";
 
-        std::cout << oss.str();
-    }
+        /**
+         * /store/{KEY}: PUT
+         * ---
+         * Given {KEY} and a data payload, breaks payload into blocks and 
+         * distributes them across the storage cluster.
+         */
+        void putHandler(http_request request, const std::string key) 
+        {
+            std::cout << "PUT req received: " << key << std::endl;
+
+            // timing point: start
+            auto start = std::chrono::high_resolution_clock::now();
+
+            /**
+             * blockNodeMap maps each block num. to a list of nodes that store it.
+             * 
+             * i.e. {block num -> [nodeA, nodeB, ...]}
+             */
+            auto blockNodeMap = std::make_shared<std::map<uint32_t, std::set<uint32_t>>>();
+
+            auto requestPayload = std::make_shared<std::vector<unsigned char>>();
+
+            std::vector<pplx::task<void>> sendBlockTasks;
+            bool success = true;
+
+            /**
+             * Break up payload data into blocks and assign each block 
+             * to R storage nodes, where R is our replication factor.
+             */
+            pplx::task<void> task = request.extract_vector()
+            .then([&](std::vector<unsigned char> payload)
+            {
+                *requestPayload = std::move(payload);
+                    
+                uint32_t payloadSize = requestPayload->size();
+                uint32_t blockCnt = 0;
+
+                std::unordered_map<uint32_t, std::vector<Block>> nodeBlockMap;
+
+                for (uint32_t i = 0; i < payloadSize; i += server->config.dataBlockSize) 
+                {
+                    // construct the block
+                    uint32_t blockNum = blockCnt++;
+                    auto blockStart = requestPayload->begin() + i;
+                    auto blockEnd = requestPayload->begin() + std::min(i + server->config.dataBlockSize, payloadSize);
+                    auto dataSize = blockEnd - blockStart;
+
+                    Block block(key, blockNum, dataSize, blockStart, blockEnd);
+
+                    // replication factor
+                    uint32_t R = std::min(server->config.replicationFactor, server->config.numStorageNodes);
+
+                    /**
+                     * Find next R (replication factor) distinct storage nodes and 
+                     * add the block to the nodes' block list.
+                     */
+                    std::string hashInput = key + std::to_string(blockNum);
+                    uint32_t hash = Crypto::sha256_32(hashInput);
+                    std::unordered_set<uint32_t> usedStorageNodes;
+                    int cnt = 0;
+
+                    while (cnt < R)
+                    {
+                        std::shared_ptr<VirtualNode> vn = server->hashRing.findNextNode(hash);
+                        uint32_t nodeId = vn->physicalNodeId;
+                        std::shared_ptr<StorageNode> sn = server->storageNodes[nodeId];
+
+                        bool nodeUnusedByBlock = usedStorageNodes.find(nodeId) == usedStorageNodes.end();
+                        bool nodeHealthy = sn->isHealthy;
+
+                        if (nodeUnusedByBlock && nodeHealthy)
+                        {
+                            nodeBlockMap[nodeId].push_back(block);
+                            usedStorageNodes.insert(nodeId);
+                            cnt++;
+                        }
+
+                        hash = vn->hash();
+                    }
+                }
+
+                return nodeBlockMap;
+            })
+
+            /**
+             * Send each storage node its block list
+             */
+            .then([&](std::unordered_map<uint32_t, std::vector<Block>> nodeBlockMap)
+            {
+                auto sendStart = std::chrono::high_resolution_clock::now();
+
+                for (auto p : nodeBlockMap)
+                {
+                    uint32_t storageNodeId = p.first;
+                    std::vector<Block> blocks = p.second;
+
+                    auto task = sendBlocks(storageNodeId, key, blocks, blockNodeMap);
+                    sendBlockTasks.push_back(task);
+                }
+
+                // wait for all `sendBlocks` tasks to finish
+                return pplx::when_all(sendBlockTasks.begin(), sendBlockTasks.end())
+                .then([&](pplx::task<void> allTasks)
+                {
+                    try
+                    {
+                        allTasks.get();
+
+                        // update kbn
+                        server->keyBlockNodeMap[key] = blockNodeMap;
+                    }
+                    catch (const std::exception& e)
+                    {
+                        std::cout << "PUT: failed - " << e.what() << std::endl;
+                        success = false;
+                        request.reply(status_codes::InternalError);
+                    }
+                });
+            });
+            
+            task.wait();
+
+            if (!success)
+                return;
+
+            server->calculateAndShowBlockDistribution(key);
+
+            // timing point: end
+            auto end = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+            std::cout << "Total Time: " << duration.count() << " ms" << std::endl;
+
+            std::cout << "PUT: successful" << std::endl;
+
+            // send success response
+            http_response response(status_codes::OK);
+            request.reply(response);
+            return;
+        }
+
+        /**
+         * Sends the given list of blocks `blocks` for key `key` to storage
+         * node `storageNodeId`.
+         * 
+         * NOTE:
+         * 
+         * `blockNodeMap` is populated in this function (see putHandler() below).
+         */
+        pplx::task<void> sendBlocks(
+            uint32_t storageNodeId,
+            std::string key,
+            std::vector<Block> &blocks,
+            std::shared_ptr<std::map<uint32_t, std::set<uint32_t>>> blockNodeMap
+        )
+        {
+            std::shared_ptr<StorageNode> sn = server->storageNodes[storageNodeId];
+
+            auto client = server->getHttpClient(sn);
+
+            // populate request payload
+            std::vector<unsigned char> payloadBuffer;
+            for (auto &block : blocks)
+                block.serialize(payloadBuffer);
+
+            // build and send request
+            http_request req = http_request();
+            req.set_method(methods::PUT);
+            req.set_request_uri(U("/store/" + key));
+            req.set_body(payloadBuffer);
+
+            pplx::task<void> task = client->request(req)
+                .then([=](http_response response) 
+                {
+                    if (response.status_code() != status_codes::OK) 
+                    {
+                        throw std::runtime_error(
+                            "sendBlocks() failed with status: " + std::to_string(response.status_code()));
+                    }
+
+                    // assign each block to node `storageNodeId`
+                    for (auto &block : blocks)
+                        (*blockNodeMap)[block.blockNum].insert(storageNodeId);
+                    
+                    return response.extract_vector();
+                })
+
+                // update node's stats
+                .then([=](std::vector<unsigned char> payload)
+                {
+                    // if removing existing blocks, subtract their stats contribution
+                    if (server->keyBlockNodeMap.find(key) != server->keyBlockNodeMap.end())
+                    {
+                        uint32_t existingBlocks = 0;
+                        for (auto &blockNodesPair : *(server->keyBlockNodeMap[key]))
+                        {
+                            std::set<uint32_t> &nodeIds = blockNodesPair.second;
+                            if (nodeIds.find(sn->id) != nodeIds.end())
+                                existingBlocks++;
+                        }
+                        sn->stats.blocksStored -= existingBlocks;
+                    }
+
+                    uint32_t blocksAdded = blocks.size();
+                    sn->stats.blocksStored += blocksAdded;
+
+                    server->updateNodeDataSizes(sn, payload);
+                });
+
+            return task;
+        }
+
+        /**
+         * /store/{KEY}:DEL
+         * ---
+         * Given {KEY}, deletes all blocks of {KEY} from the 
+         * storage cluster.
+         * 
+         * NOTE: TODO:
+         * 
+         * At the moment, we don't accept specific block numbers
+         * to delete. 
+         * 
+         * i.e. we just delete all blocks corresponding
+         * to key `key`.
+         * 
+         * Rebalancing will likely require block-level deletion capability.
+         */
+        void deleteHandler(http_request request, const std::string key) 
+        {
+            std::cout << "DEL req received: " << key << std::endl;
+
+            // check key exists
+            if (server->keyBlockNodeMap.find(key) == server->keyBlockNodeMap.end())
+            {
+                std::cout << "DEL: failed - key doesn't exist" << std::endl;
+                request.reply(status_codes::InternalError);
+                return;
+            }
+
+            // find all nodes that store at least 1 block for `key`
+            std::unordered_set<uint32_t> allNodeIds;
+            std::shared_ptr<std::map<uint32_t, std::set<uint32_t>>> blockNodeMap = server->keyBlockNodeMap[key];
+
+            for (auto p : *(blockNodeMap))
+            {
+                std::vector<uint32_t> nodeIds;
+                for (auto nodeId : nodeIds)
+                    allNodeIds.insert(nodeId);
+            }
+
+            std::vector<pplx::task<void>> delBlockTasks;
+
+            // call `deleteBlocks()` for each node
+            for (uint32_t nodeId : allNodeIds)
+            {
+                auto task = deleteBlocks(nodeId, key);
+                delBlockTasks.push_back(task);
+            }
+
+            bool success = true;
+            auto task = pplx::when_all(delBlockTasks.begin(), delBlockTasks.end())
+            .then([&](pplx::task<void> allTasks)
+            {
+                try
+                {
+                    allTasks.get();
+                }
+                catch (const std::exception& e)
+                {
+                    std::cout << "DEL: failed - " << e.what() << std::endl;
+                    success = false;
+                    request.reply(status_codes::InternalError);
+                }
+            });
+
+            task.wait();
+
+            if (!success)
+                return;
+            
+            // remove key's entry from KBN entirely
+            server->keyBlockNodeMap.erase(key);
+
+            // send success response
+            std::cout << "DEL: successful" << std::endl;
+            request.reply(status_codes::OK);
+            return;
+        }
+
+        /**
+         * Deletes all blocks correpsonding to key `key` from node `storageNodeId`.
+         */
+        pplx::task<void> deleteBlocks(uint32_t storageNodeId, std::string key)
+        {
+            std::shared_ptr<StorageNode> sn = server->storageNodes[storageNodeId];
+
+            auto client = server->getHttpClient(sn);
+
+            // build and send request
+            http_request req = http_request();
+            req.set_method(methods::DEL);
+            req.set_request_uri(U("/store/" + key));
+
+            auto task = client->request(req)
+            .then([=](http_response response)
+            {
+                if (response.status_code() != status_codes::OK)
+                {
+                    throw std::runtime_error(
+                        "deleteBlocks() failed with status: " + std::to_string(response.status_code())
+                    );
+                }
+
+                return response.extract_vector();
+            })
+
+            // update node's stats
+            .then([=](std::vector<unsigned char> payload)
+            {
+                uint32_t blocksRemoved = server->keyBlockNodeMap[key]->size();
+                sn->stats.blocksStored -= blocksRemoved;
+
+                server->updateNodeDataSizes(sn, payload);
+            });
+
+            return task;
+        }
+    };
+
+    /**
+     * Contains all handlers for our /keys endpoint.
+     */
+    class KeysEndpoint
+    {
+    private:
+        MasterServer *server;
+
+    public:
+        explicit KeysEndpoint(MasterServer *server) : server(server) {}
+
+        /**
+         * /keys:GET
+         * ---
+         * Returns newline-separated list of all keys currently stored.
+         */
+        void getHandler(http_request request) 
+        {
+            std::cout << "GET /keys req received" << std::endl;
+
+            std::ostringstream oss;
+            for (const auto &p : server->keyBlockNodeMap)
+                oss << p.first << "\n";
+            
+            request.reply(status_codes::OK, oss.str());
+        }
+    };
+
+    /**
+     * Contains all handlers for our /stats endpoint.
+     */
+    class StatsEndpoint
+    {
+    private:
+        MasterServer *server;
+    
+    public:
+        explicit StatsEndpoint(MasterServer *server) : server(server) {}
+
+        /**
+         * /stats:GET
+         * ---
+         * Returns storage node statistics in the form of a terminal-printable
+         * table.
+         * 
+         * i.e. #blocks, #keys, space used, space free, total size, etc.
+         */
+        void getHandler(http_request request)
+        {
+            std::cout << "GET /stats req received" << std::endl;
+
+            std::ostringstream statsDisplay = createStatsDisplay();
+            request.reply(status_codes::OK, statsDisplay.str());
+        }
+
+        /**
+         * Creates and returns the display string showing the statistics
+         * of each storage node.
+         */
+        std::ostringstream createStatsDisplay()
+        {
+            std::ostringstream oss;
+
+            const int numColumns = 6;
+            const int columnWidth = 15;
+            std::string divider(columnWidth, '-');
+
+            // top divider
+            for (int i = 0; i < numColumns; i++)
+            {
+                oss << divider << "-";
+                if (i == numColumns - 1)
+                    oss << "-";
+            }
+            oss << "\n";
+
+            // header row
+            oss << "|" << PrintUtils::centerText("node", columnWidth)
+                << "|" << PrintUtils::centerText("status", columnWidth)
+                << "|" << PrintUtils::centerText("#blocks", columnWidth)
+                << "|" << PrintUtils::centerText("used", columnWidth)
+                << "|" << PrintUtils::centerText("free", columnWidth)
+                << "|" << PrintUtils::centerText("total", columnWidth)
+                << "|"
+                << "\n";
+            
+            // middle divider 
+            for (int i = 0; i < numColumns; i++)
+            {
+                oss << "|" << divider;
+                if (i == numColumns - 1)
+                    oss << "|";
+            }
+
+            oss << "\n";
+            
+            // print each node row
+            for (auto &p : server->storageNodes)
+            {
+                uint32_t nodeId = p.first;
+                std::shared_ptr<StorageNode> sn = p.second;
+
+                StorageNodeStats nodeStats = sn->stats;
+
+                std::string nodeText = std::to_string(nodeId);
+                std::string nodeStatusText = sn->isHealthy ? "running" : "down";
+                std::string nodeNumBlocksText = std::to_string(nodeStats.blocksStored);
+                std::string nodeFreeSizeText = PrintUtils::formatNumBytes(nodeStats.dataBytesUsed);
+                std::string nodeUsedSizeText = PrintUtils::formatNumBytes(nodeStats.dataBytesFree);
+                std::string nodeTotalSizeText = PrintUtils::formatNumBytes(nodeStats.dataBytesTotal);
+
+                oss << "|" << PrintUtils::centerText(nodeText, columnWidth)            
+                    << "|" << PrintUtils::centerText(nodeStatusText, columnWidth)     
+                    << "|" << PrintUtils::centerText(nodeNumBlocksText, columnWidth) 
+                    << "|" << PrintUtils::centerText(nodeFreeSizeText, columnWidth)  
+                    << "|" << PrintUtils::centerText(nodeUsedSizeText, columnWidth) 
+                    << "|" << PrintUtils::centerText(nodeTotalSizeText, columnWidth) 
+                    << "|"
+                    << "\n";
+            }
+
+            // bottom divider
+            for (int i = 0; i < numColumns; i++)
+            {
+                oss << divider << "-";
+                if (i == numColumns - 1)
+                    oss << "-";
+            }
+
+            oss << "\n";
+
+            return oss;
+        }
+    };
 
     /**
      * Add our pre-defined storage nodes and add their virtual nodes
@@ -215,553 +820,76 @@ public:
     }
 
     /**
-     * Retreives blocks `blockNums` for key `key` from node `storageNodeId`.
-     * 
-     * NOTE:
-     * 
-     * `blockMap` is populated by this function (see getHandler() below).
+     * Calculates and displays the distribution of the given `key`s blocks
+     * across the storage nodes.
      */
-    pplx::task<void> getBlocks(
-        uint32_t storageNodeId,
-        std::string key,
-        std::vector<uint32_t> blockNums,
-        std::shared_ptr<std::map<uint32_t, Block>> blockMap,
-        std::shared_ptr<std::vector<unsigned char>> responsePayload
-    )
+    void calculateAndShowBlockDistribution(std::string key) 
     {
-        std::shared_ptr<StorageNode> sn = this->storageNodes[storageNodeId];
-
-        auto client = getHttpClient(sn);
-
-        /**
-         * Serialise block numbers to send as payload.
-         */
-        std::vector<unsigned char> requestPayload;
-        for (uint32_t bn : blockNums)
-        {
-            requestPayload.insert(
-                requestPayload.end(),
-                reinterpret_cast<unsigned char*>(&bn),
-                reinterpret_cast<unsigned char*>(&bn) + sizeof(bn)
-            );
-        }
-
-        // build and send request
-        http_request req = http_request();
-        req.set_method(methods::GET);
-        req.set_request_uri(U("/store/" + key));
-        req.set_body(requestPayload);
-
-        return client->request(req)
-        .then([=](http_response response)
-        {
-            if (response.status_code() != status_codes::OK)
-            {
-                throw std::runtime_error(
-                    "getBlocks() failed with status: " + std::to_string(response.status_code()));
-            }
-            return response.extract_vector();
-        })
-
-        // deserialise payload and populate block map
-        .then([=](std::vector<unsigned char> payload)
-        {
-            *responsePayload = payload;
-            std::vector<Block> blocks = Block::deserialize(*(responsePayload));
-            for (auto block : blocks)
-            {
-                blockMap->insert({block.blockNum, std::move(block)});
-            }
-        });
-    }
-
-    /**
-     * /store/{KEY}: GET
-     * ---
-     * Requests all of {KEY}'s blocks from the storage cluster
-     * and returns them in order.
-     */
-    void getHandler(http_request request, const std::string key) 
-    {
-        std::cout << "GET req received: " << key << std::endl;
-
-        // timing point: start
-        auto start = std::chrono::high_resolution_clock::now();
-
-        // check key exists
-        if (this->keyBlockNodeMap.find(key) == this->keyBlockNodeMap.end())
-        {
-            std::cout << "GET: failed - key doesn't exist" << std::endl;
-            request.reply(status_codes::InternalError);
-            return;
-        }
-
-        std::shared_ptr<std::map<uint32_t, std::set<uint32_t>>> blockNodeMap = this->keyBlockNodeMap[key];
+        std::map<uint32_t, uint32_t> nodeBlockCounts; // node id -> block count
         
-        /**
-         * For each block, we chose the first healthy storage node that
-         * stores it.
-         * 
-         * We store our 'choices' in nodeBlockMap, which is a mapping
-         * of the form: {node id -> block num list}.
-         */
-        std::unordered_map<uint32_t, std::vector<uint32_t>> nodeBlockMap;
-        for (auto p : *(blockNodeMap))        
+        std::map<uint32_t, std::set<uint32_t>> blockNodeMap = *(this->keyBlockNodeMap[key]);
+        uint32_t totalNumBlocks = blockNodeMap.size();
+        uint32_t totalNumReplicatedBlocks = 0;
+
+        for (auto p: blockNodeMap)
         {
-            uint32_t blockNum = p.first;
+            uint32_t blockNum = p.first; 
             std::set<uint32_t> nodeIds = p.second;
 
-            bool foundHealthy = false;
             for (auto nodeId : nodeIds)
             {
-                std::shared_ptr<StorageNode> sn = this->storageNodes[nodeId];
-                if (sn->isHealthy)
-                {
-                    nodeBlockMap[nodeId].push_back(blockNum);
-                    foundHealthy = true;
-                    break;
-                }
+                if (nodeBlockCounts.find(nodeId) == nodeBlockCounts.end())
+                    nodeBlockCounts[nodeId] = 0;
+                nodeBlockCounts[nodeId]++;
+                totalNumReplicatedBlocks++;
             }
-
-            if (!foundHealthy)
-                throw std::runtime_error("Error: no healthy nodes available for block " + std::to_string(blockNum));
         }
 
-        // mapping of the form: {block num. -> block object}
-        auto blockMap = std::make_shared<std::map<uint32_t, Block>>();
+        std::ostringstream oss;
 
-        std::vector<std::shared_ptr<std::vector<unsigned char>>> responsePayloads;
-        
-        /**
-         * Call `getBlocks` for each node and wait on all tasks 
-         * to finish.
-         */
-        std::vector<pplx::task<void>> getBlockTasks;
-        for (auto p : nodeBlockMap)
-        {
-            uint32_t nodeId = p.first;
-            std::vector<uint32_t> blockNums = p.second;
-
-            auto responsePayload = std::make_shared<std::vector<unsigned char>>();
-            responsePayloads.push_back(responsePayload);
-
-            auto task = getBlocks(nodeId, key, blockNums, blockMap, responsePayload);
-            getBlockTasks.push_back(task);
+        oss << "\n";
+        oss << "-------------------\n";
+        oss << "key: " << key << "\n";
+        oss << "unique blocks: " << totalNumBlocks << "\n";
+        oss << "total blocks (including replicas): " << totalNumReplicatedBlocks << "\n";
+        oss << "block distribution:\n";
+        oss << "{\n";
+        for (const auto& [nodeId, blockCount] : nodeBlockCounts) {
+            oss << "  " << nodeId << ": " << blockCount << "\n";
         }
+        oss << "}\n";
+        oss << "-------------------\n";
+        oss << "\n";
 
-        bool success = true;
-        auto task = pplx::when_all(getBlockTasks.begin(), getBlockTasks.end())
-        .then([&request, &success](pplx::task<void> allTasks)
-        {
-            try 
-            {
-                allTasks.get();
-            }
-            catch (const std::exception& e)
-            {
-                std::cout << "GET: failed - " << e.what() << std::endl;
-                success = false;
-
-                request.reply(status_codes::InternalError);
-            }
-        });
-
-        task.wait();
-
-        if (!success)
-            return;
-
-        // recombine blocks in order
-        std::vector<unsigned char> payloadBuffer;
-        for (auto p : *(blockMap))
-        {
-            Block block = p.second;
-            payloadBuffer.insert(payloadBuffer.end(), block.dataStart, block.dataEnd);
-        }
-
-        // timing point: end
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        std::cout << "Total Time: " << duration.count() << " ms" << std::endl;
-
-        std::cout << "GET: successful" << std::endl;
-
-        // send success response
-        http_response response(status_codes::OK);
-        response.set_body(payloadBuffer);
-        request.reply(response);
-        return;
+        std::cout << oss.str();
     }
 
     /**
-     * Sends the given list of blocks `blocks` for key `key` to storage
-     * node `storageNodeId`.
+     * Updates the given storage node's data size statistics
+     * from the given `sizeResponseBuffer`.
      * 
      * NOTE:
      * 
-     * `blockNodeMap` is populated in this function (see putHandler() below).
+     * Master receives a 'size response' on PUT and DEL, which 
+     * gives the new data sizes for that storage node after the 
+     * given operation (see StorageServer docs for API details).
      */
-    pplx::task<void> sendBlocks(
-        uint32_t storageNodeId,
-        std::string key,
-        std::vector<Block> &blocks,
-        std::shared_ptr<std::map<uint32_t, std::set<uint32_t>>> blockNodeMap
-    )
-    {
-        std::shared_ptr<StorageNode> sn = this->storageNodes[storageNodeId];
-
-        auto client = getHttpClient(sn);
-
-        // populate request payload
-        std::vector<unsigned char> payloadBuffer;
-        for (auto &block : blocks)
-            block.serialize(payloadBuffer);
-
-        // build and send request
-        http_request req = http_request();
-        req.set_method(methods::PUT);
-        req.set_request_uri(U("/store/" + key));
-        req.set_body(payloadBuffer);
-
-        pplx::task<void> task = client->request(req)
-            .then([=](http_response response) 
-            {
-                if (response.status_code() != status_codes::OK) 
-                {
-                    throw std::runtime_error(
-                        "sendBlocks() failed with status: " + std::to_string(response.status_code()));
-                }
-
-                // assign each block to node `storageNodeId`
-                for (auto &block : blocks)
-                    (*blockNodeMap)[block.blockNum].insert(storageNodeId);
-                
-                return response.extract_vector();
-            })
-
-            .then([=](std::vector<unsigned char> payload)
-            {
-                // update node's stats
-                uint32_t blocksAdded = blocks.size();
-                updateNodesBlockCount(sn, key, blocksAdded);
-                updateNodesDataSizes(sn, payload);
-            });
-
-        return task;
-    }
-
-    /**
-     * /store/{KEY}: PUT
-     * ---
-     * Given {KEY} and a data payload, breaks payload into blocks and 
-     * distributes them across the storage cluster.
-     */
-    void putHandler(http_request request, const std::string key) 
-    {
-        std::cout << "PUT req received: " << key << std::endl;
-
-        // timing point: start
-        auto start = std::chrono::high_resolution_clock::now();
-
-        /**
-         * blockNodeMap maps each block num. to a list of nodes that store it.
-         * 
-         * i.e. {block num -> [nodeA, nodeB, ...]}
-         */
-        auto blockNodeMap = std::make_shared<std::map<uint32_t, std::set<uint32_t>>>();
-
-        auto requestPayload = std::make_shared<std::vector<unsigned char>>();
-
-        std::vector<pplx::task<void>> sendBlockTasks;
-        bool success = true;
-
-        /**
-         * Break up payload data into blocks and assign each block 
-         * to R storage nodes, where R is our replication factor.
-         */
-        pplx::task<void> task = request.extract_vector()
-        .then([&](std::vector<unsigned char> payload)
-        {
-            *requestPayload = std::move(payload);
-                  
-            uint32_t payloadSize = requestPayload->size();
-            uint32_t blockCnt = 0;
-
-            std::unordered_map<uint32_t, std::vector<Block>> nodeBlockMap;
-
-            for (uint32_t i = 0; i < payloadSize; i += config.dataBlockSize) 
-            {
-                // construct the block
-                uint32_t blockNum = blockCnt++;
-                auto blockStart = requestPayload->begin() + i;
-                auto blockEnd = requestPayload->begin() + std::min(i + config.dataBlockSize, payloadSize);
-                auto dataSize = blockEnd - blockStart;
-
-                Block block(key, blockNum, dataSize, blockStart, blockEnd);
-
-                // replication factor
-                uint32_t R = std::min(this->config.replicationFactor, this->config.numStorageNodes);
-
-                /**
-                 * Find next R (replication factor) distinct storage nodes and 
-                 * add the block to the nodes' block list.
-                 */
-                std::string hashInput = key + std::to_string(blockNum);
-                uint32_t hash = Crypto::sha256_32(hashInput);
-                std::unordered_set<uint32_t> usedStorageNodes;
-                int cnt = 0;
-
-                while (cnt < R)
-                {
-                    std::shared_ptr<VirtualNode> vn = this->hashRing.findNextNode(hash);
-                    uint32_t nodeId = vn->physicalNodeId;
-                    std::shared_ptr<StorageNode> sn = this->storageNodes[nodeId];
-
-                    bool nodeUnusedByBlock = usedStorageNodes.find(nodeId) == usedStorageNodes.end();
-                    bool nodeHealthy = sn->isHealthy;
-
-                    if (nodeUnusedByBlock && nodeHealthy)
-                    {
-                        nodeBlockMap[nodeId].push_back(block);
-                        usedStorageNodes.insert(nodeId);
-                        cnt++;
-                    }
-
-                    hash = vn->hash();
-                }
-            }
-
-            return nodeBlockMap;
-        })
-
-        /**
-         * Send each storage node its block list
-         */
-        .then([&](std::unordered_map<uint32_t, std::vector<Block>> nodeBlockMap)
-        {
-            auto sendStart = std::chrono::high_resolution_clock::now();
-
-            for (auto p : nodeBlockMap)
-            {
-                uint32_t storageNodeId = p.first;
-                std::vector<Block> blocks = p.second;
-
-                auto task = sendBlocks(storageNodeId, key, blocks, blockNodeMap);
-                sendBlockTasks.push_back(task);
-            }
-
-            // wait for all `sendBlocks` tasks to finish
-            return pplx::when_all(sendBlockTasks.begin(), sendBlockTasks.end())
-            .then([&](pplx::task<void> allTasks)
-            {
-                try
-                {
-                    allTasks.get();
-
-                    // update kbn
-                    this->keyBlockNodeMap[key] = blockNodeMap;
-                }
-                catch (const std::exception& e)
-                {
-                    std::cout << "PUT: failed - " << e.what() << std::endl;
-                    success = false;
-                    request.reply(status_codes::InternalError);
-                }
-            });
-        });
-        
-        task.wait();
-
-        if (!success)
-            return;
-
-        calculateAndShowBlockDistribution(key);
-
-        // timing point: end
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        std::cout << "Total Time: " << duration.count() << " ms" << std::endl;
-
-        std::cout << "PUT: successful" << std::endl;
-
-        // send success response
-        http_response response(status_codes::OK);
-        request.reply(response);
-        return;
-    }
-
-    /**
-     * Deletes all blocks correpsonding to key `key` from node `storageNodeId`.
-     */
-    pplx::task<void> deleteBlocks(uint32_t storageNodeId, std::string key)
-    {
-        std::shared_ptr<StorageNode> sn = this->storageNodes[storageNodeId];
-
-        auto client = getHttpClient(sn);
-
-        // build and send request
-        http_request req = http_request();
-        req.set_method(methods::DEL);
-        req.set_request_uri(U("/store/" + key));
-
-        auto task = client->request(req)
-        .then([=](http_response response)
-        {
-            if (response.status_code() != status_codes::OK)
-            {
-                throw std::runtime_error(
-                    "deleteBlocks() failed with status: " + std::to_string(response.status_code())
-                );
-            }
-
-            return response.extract_vector();
-        })
-
-        .then([=](std::vector<unsigned char> payload)
-        {
-            // update node's stats
-            uint32_t blocksAdded = this->keyBlockNodeMap[key]->size();
-            updateNodesBlockCount(sn, key, blocksAdded);
-            updateNodesDataSizes(sn, payload);
-        });
-
-        return task;
-    }
-
-    /**
-     * /store/{KEY}:DEL
-     * ---
-     * Given {KEY}, deletes all blocks of {KEY} from the 
-     * storage cluster.
-     * 
-     * NOTE: TODO:
-     * 
-     * At the moment, we don't accept specific block numbers
-     * to delete. 
-     * 
-     * i.e. we just delete all blocks corresponding
-     * to key `key`.
-     * 
-     * Rebalancing will likely require block-level deletion capability.
-     */
-    void deleteHandler(http_request request, const std::string key) 
-    {
-        std::cout << "DEL req received: " << key << std::endl;
-
-        // check key exists
-        if (this->keyBlockNodeMap.find(key) == this->keyBlockNodeMap.end())
-        {
-            std::cout << "DEL: failed - key doesn't exist" << std::endl;
-            request.reply(status_codes::InternalError);
-            return;
-        }
-
-        // find all nodes that store at least 1 block for `key`
-        std::unordered_set<uint32_t> allNodeIds;
-        std::shared_ptr<std::map<uint32_t, std::set<uint32_t>>> blockNodeMap = this->keyBlockNodeMap[key];
-
-        for (auto p : *(blockNodeMap))
-        {
-            std::vector<uint32_t> nodeIds;
-            for (auto nodeId : nodeIds)
-                allNodeIds.insert(nodeId);
-        }
-
-        std::vector<pplx::task<void>> delBlockTasks;
-
-        // call `deleteBlocks()` for each node
-        for (uint32_t nodeId : allNodeIds)
-        {
-            auto task = deleteBlocks(nodeId, key);
-            delBlockTasks.push_back(task);
-        }
-
-        bool success = true;
-        auto task = pplx::when_all(delBlockTasks.begin(), delBlockTasks.end())
-        .then([&](pplx::task<void> allTasks)
-        {
-            try
-            {
-                allTasks.get();
-            }
-            catch (const std::exception& e)
-            {
-                std::cout << "DEL: failed - " << e.what() << std::endl;
-                success = false;
-                request.reply(status_codes::InternalError);
-            }
-        });
-
-        task.wait();
-
-        if (!success)
-            return;
-        
-        // remove key's entry from KBN entirely
-        this->keyBlockNodeMap.erase(key);
-
-        // send success response
-        std::cout << "DEL: successful" << std::endl;
-        request.reply(status_codes::OK);
-        return;
-    }
-
-    /**
-     * /keys:GET
-     * ---
-     * Returns newline-separated list of all keys currently stored.
-     */
-    void getKeysHandler(http_request request) 
-    {
-        std::cout << "GET /keys req received" << std::endl;
-
-        std::ostringstream oss;
-        for (const auto &p : keyBlockNodeMap)
-            oss << p.first << "\n";
-        
-        request.reply(status_codes::OK, oss.str());
-    }
-
-    void updateNodesBlockCount(
+    void updateNodeDataSizes(
         std::shared_ptr<StorageNode> sn,
-        std::string key,
-        uint32_t blocksAdded
-    )
-    {
-        // if removing existing blocks, subtract their stats contribution
-        if (this->keyBlockNodeMap.find(key) != this->keyBlockNodeMap.end())
-        {
-            uint32_t existingBlocks = 0;
-
-            for (auto &blockNodesPair : *(this->keyBlockNodeMap[key]))
-            {
-                std::set<uint32_t> &nodeIds = blockNodesPair.second;
-                if (nodeIds.find(sn->id) != nodeIds.end())
-                    existingBlocks++;
-            }
-
-            sn->stats.blocksStored -= existingBlocks;
-        }
-
-        sn->stats.blocksStored += blocksAdded;
-    }
-    
-    void updateNodesDataSizes(
-        std::shared_ptr<StorageNode> sn,
-        std::vector<unsigned char> &responseBuffer)
+        std::vector<unsigned char> &sizeResponseBuffer)
     {
         uint32_t dataUsedSize;
         uint32_t dataTotalSize;
         uint32_t dataFreeSize;
 
-        auto it = responseBuffer.begin();
+        auto it = sizeResponseBuffer.begin();
 
         std::memcpy(&dataUsedSize, &(*it), sizeof(dataUsedSize));
         it += sizeof(dataUsedSize);
         std::memcpy(&dataTotalSize, &(*it), sizeof(dataTotalSize));
         it += sizeof(dataTotalSize);
 
-        assert(it == responseBuffer.end());
+        assert(it == sizeResponseBuffer.end());
 
         sn->stats.dataBytesUsed = dataUsedSize;
         sn->stats.dataBytesFree = dataTotalSize - dataUsedSize;
@@ -769,184 +897,36 @@ public:
         return;
     }
 
-    std::string centerText(std::string text, int width) {
-        size_t size = text.size(); 
-
-        if (size > static_cast<size_t>(width)) 
-            return text.substr(0, width);
-
-        int padding = (width - size) / 2;
-        int extra = (width - size) % 2; // handle odd padding
-        return std::string(padding, ' ') + text + std::string(padding + extra, ' ');
-    }
-
-    std::ostringstream createStatsDisplay()
-    {
-        std::ostringstream oss;
-
-        const int numColumns = 6;
-        const int columnWidth = 15;
-        std::string divider(columnWidth, '-');
-
-        // top divider
-        for (int i = 0; i < numColumns; i++)
-        {
-            oss << divider << "-";
-            if (i == numColumns - 1)
-                oss << "-";
-        }
-        oss << "\n";
-
-        // header row
-        oss << "|" << centerText("node", columnWidth)
-            << "|" << centerText("status", columnWidth)
-            << "|" << centerText("#blocks", columnWidth)
-            << "|" << centerText("used (bytes)", columnWidth)
-            << "|" << centerText("free (bytes)", columnWidth)
-            << "|" << centerText("total (bytes)", columnWidth)
-            << "|"
-            << "\n";
-        
-        // middle divider 
-        for (int i = 0; i < numColumns; i++)
-        {
-            oss << "|" << divider;
-            if (i == numColumns - 1)
-                oss << "|";
-        }
-
-        oss << "\n";
-        
-        // print each node row
-        for (auto &p : this->storageNodes)
-        {
-            uint32_t nodeId = p.first;
-            std::shared_ptr<StorageNode> sn = p.second;
-
-            StorageNodeStats nodeStats = sn->stats;
-
-            std::string nodeText = std::to_string(nodeId);
-            std::string nodeStatusText = sn->isHealthy ? "(running)" : "(down)";
-            std::string nodeNumBlocksText = std::to_string(nodeStats.blocksStored);
-            std::string nodeFreeSizeText = std::to_string(nodeStats.dataBytesUsed);
-            std::string nodeUsedSizeText = std::to_string(nodeStats.dataBytesFree);
-            std::string nodeTotalSizeText = std::to_string(nodeStats.dataBytesTotal);
-
-            oss << "|" << centerText(nodeText, columnWidth)            
-                << "|" << centerText(nodeStatusText, columnWidth)     
-                << "|" << centerText(nodeNumBlocksText, columnWidth) 
-                << "|" << centerText(nodeFreeSizeText, columnWidth)  
-                << "|" << centerText(nodeUsedSizeText, columnWidth) 
-                << "|" << centerText(nodeTotalSizeText, columnWidth) 
-                << "|"
-                << "\n";
-        }
-
-        // bottom divider
-        for (int i = 0; i < numColumns; i++)
-        {
-            oss << divider << "-";
-            if (i == numColumns - 1)
-                oss << "-";
-        }
-
-        oss << "\n";
-
-        return oss;
-    }
-
     /**
-     * Retreive used space, free space and total size (all in bytes)
-     * from node `storageNodeId`, and populate the given stat maps.
+     * Routes the given `request` to the appropriate endpoint / handler.
      */
-    pplx::task<void> getNodeStats(uint32_t storageNodeId)
-    {
-        std::shared_ptr<StorageNode> sn = this->storageNodes[storageNodeId];
-        auto client = getHttpClient(sn);
-
-        // build and send request
-        http_request request = http_request();
-        request.set_method(methods::GET);
-        request.set_request_uri(U("/stats"));
-
-        auto task = client->request(request)
-        .then([&](http_response response)
-        {
-            if (response.status_code() != status_codes::OK)
-            {
-                throw std::runtime_error(
-                    "getNodeStats() failed with status: " + std::to_string(response.status_code())
-                );
-            }
-
-            return response.extract_vector();
-        })
-        
-        .then([=](std::vector<unsigned char> payload)
-        {
-            uint32_t dataUsedSize;
-            uint32_t dataTotalSize;
-            uint32_t dataFreeSize;
-
-            auto it = payload.begin();
-
-            std::memcpy(&dataUsedSize, &(*it), sizeof(dataUsedSize));
-            it += sizeof(dataUsedSize);
-            std::memcpy(&dataTotalSize, &(*it), sizeof(dataTotalSize));
-            it += sizeof(dataTotalSize);
-
-            assert(it == payload.end());
-            dataFreeSize = dataTotalSize - dataUsedSize;
-
-            sn->stats.dataBytesUsed = dataUsedSize;
-            sn->stats.dataBytesFree = dataFreeSize;
-            sn->stats.dataBytesTotal = dataTotalSize;
-        });
-
-        return task;
-    }
-
-    /**
-     * /stats:GET
-     * ---
-     * Returns storage node statistics 
-     * i.e. #blocks, #keys, space used, space free, total size, etc.
-     * 
-     * TODO:
-     * 
-     * cache stats, update each time we write
-     */
-    void getStatsHandler(http_request request)
-    {
-        std::cout << "GET /stats req received" << std::endl;
-
-        std::ostringstream statsDisplay = createStatsDisplay();
-        request.reply(status_codes::OK, statsDisplay.str());
-    }
-
     void router(http_request request) {
         auto p = ApiUtils::parsePath(request.relative_uri().to_string());
         std::string endpoint = p.first;
         std::string param = p.second;
 
+        StoreEndpoint storeEndpoint(this);
+        KeysEndpoint keysEndpoint(this);
+        StatsEndpoint statsEndpoint(this);
+
         if (endpoint == U("/store"))
         {
             if (request.method() == methods::GET)
-                this->getHandler(request, param);
+                storeEndpoint.getHandler(request, param);
             if (request.method() == methods::PUT)
-                this->putHandler(request, param);
+                storeEndpoint.putHandler(request, param);
             if (request.method() == methods::DEL)
-                this->deleteHandler(request, param);
+                storeEndpoint.deleteHandler(request, param);
         }
         else if (endpoint == U("/keys") && param == U(""))
         {
             if (request.method() == methods::GET)
-                this->getKeysHandler(request);
+                keysEndpoint.getHandler(request);
         }
         else if (endpoint == U("/stats") && param == U(""))
         {
             if (request.method() == methods::GET)
-                this->getStatsHandler(request);
+                statsEndpoint.getHandler(request);
         }
         else 
         {
@@ -955,6 +935,9 @@ public:
         }
     }
 
+    /**
+     * Starts the master server and starts the node health thread (see checkNodeHealth()).
+     */
     void startServer() 
     {
         uri_builder uri(this->config.masterServerIPPort);
@@ -1053,8 +1036,12 @@ int main()
 
 /*
 TODO:
-    - fix retarded existingBlocks stats subtract
+    - fix 'no delete' bug
     - find nice abstraction for endpoints
+    - master restarting
+        - i.e. minimal master persistence to rebuild from shutdown / reboot
+        - /sync endpoint on storage server that master hits on start for each server
+    - adding / removing nodes / rebalancing
     - generally fix up .then logic
         - not really async sometimes
         - may have expensive unintended copies when capturing
@@ -1063,9 +1050,6 @@ TODO:
     - handle hash collisions
         - in BAT AND on hash ring
     - user should receive actual error messages
-    - master restarting
-        - i.e. minimal master persistence to rebuild from shutdown / reboot
-    - adding / removing nodes / rebalancing
     - investigate distribution of key's blocks 
         - particularly want to ensure that block numbers
           are themselves evenly distributed

@@ -221,22 +221,6 @@ public:
     }
 
     /**
-     * Reponds to master server's request for this nodes stats, namely:
-     *      - num. bytes of data section used
-     *      - total size (in bytes) of data section
-     */
-    void statsHandler(http_request request)
-    {
-        std::vector<unsigned char> responseBuffer = createSizeResponseBuffer();
-
-        http_response response;
-        response.set_status_code(status_codes::OK);
-        response.set_body(responseBuffer);
-        request.reply(response);
-        return;
-    }
-
-    /**
      * Retreives node's unique id via the environment variable `NODE_ID`.
      */
     int getNodeIDFromEnv() {
@@ -269,6 +253,8 @@ public:
         std::string endpoint = p.first;
         std::string key = p.second;
 
+        std::cout << "REQ RECEIVED: " << endpoint << " " << key << std::endl;
+
         if (endpoint == U("/store"))
         {
             if (request.method() == methods::GET)
@@ -282,11 +268,6 @@ public:
         {
             if (request.method() == methods::GET)
                 this->healthCheckHandler(request);
-        }
-        else if (endpoint == U("/stats"))
-        {
-            if (request.method() == methods::GET)
-                this->statsHandler(request);
         }
         else 
         {

@@ -68,6 +68,43 @@ namespace PrintUtils {
                   << value
                   << std::endl;
     }
+
+    /**
+     * Pads `text` such that it sits in the center of a 
+     * new text string of width `width`.
+     */
+    std::string centerText(std::string text, int width) 
+    {
+        size_t size = text.size(); 
+
+        if (size > static_cast<size_t>(width)) 
+            return text.substr(0, width);
+
+        int padding = (width - size) / 2;
+        int extra = (width - size) % 2; // handle odd padding
+        return std::string(padding, ' ') + text + std::string(padding + extra, ' ');
+    }
+
+    /**
+     * Returns compact string representation of the number of
+     * bytes `bytes`, using traditional suffixes KB/MB/GB/TB etc.
+     */
+    std::string formatNumBytes(uint64_t bytes)
+    {
+        const char* suffixes[] = {" bytes", "KB", "MB", "GB", "TB", "PB"};
+        int suffixIndex = 0;
+        double size = static_cast<double>(bytes);
+
+        while (size >= 1024 && suffixIndex < 5)
+        {
+            size /= 1024;
+            suffixIndex++;
+        }
+
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(2) << size << " " << suffixes[suffixIndex];
+        return oss.str();
+    }
 }
 
 namespace MathUtils

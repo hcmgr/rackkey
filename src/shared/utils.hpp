@@ -89,6 +89,18 @@ namespace PrintUtils {
      * Prints given 32-bit integer in hex form
      */
     void printHex32(uint32_t value);
+
+    /**
+     * Pads `text` such that it sits in the center of a 
+     * new text string of width `width`.
+     */
+    std::string centerText(std::string text, int width);
+
+    /**
+     * Returns compact string representation of the number of
+     * bytes `bytes`, using traditional suffixes KB/MB/GB/TB etc.
+     */
+    std::string formatNumBytes(uint64_t bytes);
 };
 
 namespace MathUtils
