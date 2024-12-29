@@ -34,5 +34,7 @@ void MasterConfig::loadVariables()
      * shared config
      */
     json::value shared = this->jsonConfig.at("shared");
+
     this->dataBlockSize = shared.at(U("dataBlockSize")).as_integer();
+    this->keyLengthMax = shared.at(U("keyLengthMax")).as_integer();
 }

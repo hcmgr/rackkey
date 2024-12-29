@@ -1,10 +1,10 @@
-curl -X PUT localhost:9000/store/images.zip --data-binary @in/images.zip
+# curl -X PUT localhost:9000/store/images.zip --data-binary @in/images.zip
 curl -X GET localhost:9000/store/images.zip -o out/images.zip
 cd out/
 unzip -o images.zip
 cd ../
 
-curl -X PUT localhost:9000/store/small_shakespeare.txt --data-binary @in/small_shakespeare.txt
+# curl -X PUT localhost:9000/store/small_shakespeare.txt --data-binary @in/small_shakespeare.txt
 curl -X GET localhost:9000/store/small_shakespeare.txt -o out/small_shakespeare.txt
 diff in/small_shakespeare.txt out/small_shakespeare.txt
 

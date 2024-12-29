@@ -135,12 +135,6 @@ namespace StringUtils
     {
         s.resize(size, '\0');
         return s;
-
-        // if (s.size() < size)
-        //     s.append(size - s.size(), '\0');
-        // else
-        //     s = s.substr(0, size);
-        // return s;
     }
 }
 

@@ -37,4 +37,7 @@ public:
      * Size of data (in bytes) each data block (i.e. Block object) stores.
      */
     uint32_t dataBlockSize;
+
+    /* Maximum size of key in bytes/chars */
+    uint32_t keyLengthMax;
 };

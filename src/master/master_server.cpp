@@ -72,12 +72,10 @@ public:
 
     /* Default constructor */
     MasterServer(std::string configFilePath) 
-        : hashRing(),
-          keyBlockNodeMap(),
-          config(configFilePath)
+        : config(configFilePath)
     {
         initialiseStorageNodes();
-        // syncWithStorageNodes();
+        syncWithStorageNodes();
     }
 
     ~MasterServer() {}
@@ -107,6 +105,7 @@ public:
             auto start = std::chrono::high_resolution_clock::now();
 
             // check key exists
+            server->showKbn();
             if (server->keyBlockNodeMap.find(key) == server->keyBlockNodeMap.end())
             {
                 std::cout << "GET: failed - key doesn't exist" << std::endl;
@@ -204,7 +203,7 @@ public:
 
             std::cout << "GET: successful" << std::endl;
 
-            server->syncWithStorageNodes();
+            // server->syncWithStorageNodes();
 
             // send success response
             http_response response(status_codes::OK);
@@ -409,6 +408,8 @@ public:
             std::cout << "Total Time: " << duration.count() << " ms" << std::endl;
 
             std::cout << "PUT: successful" << std::endl;
+
+            server->showKbn();
 
             // send success response
             http_response response(status_codes::OK);
@@ -772,6 +773,8 @@ public:
 
         auto task = pplx::when_all(syncTasks.begin(), syncTasks.end());
         task.wait();
+
+        showKbn();
     }
 
     /**
@@ -803,6 +806,27 @@ public:
         .then([=](std::vector<unsigned char> payload)
         {
             Payloads::SyncResponse syncResponse = Payloads::SyncResponse::deserialize(payload);
+
+            /**
+             * Assign each key's block numbers to node `storageNodeId`
+             */
+            for (auto &p : syncResponse.keyBlockNumMap)
+            {
+                std::string key = p.first;
+                std::vector<uint32_t> blockNums = p.second;
+
+                key = StringUtils::fixedSize(key, 50);
+
+                auto blockNodeMap = std::make_shared<std::map<uint32_t, std::set<uint32_t>>>();
+                this->keyBlockNodeMap[key] = blockNodeMap;
+
+                for (auto bn : blockNums)
+                {
+                    if (blockNodeMap->find(bn) == blockNodeMap->end())
+                        blockNodeMap->insert({bn, std::set<uint32_t>()});
+                    blockNodeMap->at(bn).insert(storageNodeId);
+                }
+            }
         });
         return task;
     }
@@ -883,6 +907,36 @@ public:
         return this->openConnections[sn->id];
     }
 
+    void showKbn() 
+    {
+        std::ostringstream oss;
+
+        oss << "{\n";
+        for (const auto& [key, blockMapPtr] : keyBlockNodeMap) {
+            oss << "  \"" << key << "\": {\n";
+
+            if (blockMapPtr) {
+                for (const auto& [blockNum, nodeSet] : *blockMapPtr) {
+                    oss << "    Block " << blockNum << ": { ";
+                    for (auto it = nodeSet.begin(); it != nodeSet.end(); ++it) {
+                        oss << *it;
+                        if (std::next(it) != nodeSet.end()) {
+                            oss << ", ";
+                        }
+                    }
+                    oss << " }\n";
+                }
+            } else {
+                oss << "    (null pointer)\n";
+            }
+
+            oss << "  }\n";
+        }
+        oss << "}\n";
+
+        std::cout << oss.str() << std::endl;
+    }
+
     /**
      * Calculates and displays the distribution of the given `key`s blocks
      * across the storage nodes.
@@ -956,7 +1010,10 @@ public:
     void router(http_request request) {
         auto p = ApiUtils::parsePath(request.relative_uri().to_string());
         std::string endpoint = p.first;
-        std::string param = p.second;
+        std::string key = p.second;
+
+        // Network truncates the key's null bytes. Resize to our fixed key size.
+        key = StringUtils::fixedSize(key, this->config.keyLengthMax);
 
         StoreEndpoint storeEndpoint(this);
         KeysEndpoint keysEndpoint(this);
@@ -965,18 +1022,18 @@ public:
         if (endpoint == U("/store"))
         {
             if (request.method() == methods::GET)
-                storeEndpoint.getHandler(request, param);
+                storeEndpoint.getHandler(request, key);
             if (request.method() == methods::PUT)
-                storeEndpoint.putHandler(request, param);
+                storeEndpoint.putHandler(request, key);
             if (request.method() == methods::DEL)
-                storeEndpoint.deleteHandler(request, param);
+                storeEndpoint.deleteHandler(request, key);
         }
-        else if (endpoint == U("/keys") && param == U(""))
+        else if (endpoint == U("/keys") && key == U(""))
         {
             if (request.method() == methods::GET)
                 keysEndpoint.getHandler(request);
         }
-        else if (endpoint == U("/stats") && param == U(""))
+        else if (endpoint == U("/stats") && key == U(""))
         {
             if (request.method() == methods::GET)
                 statsEndpoint.getHandler(request);
@@ -1039,12 +1096,11 @@ int main()
 
 /*
 TODO:
-    - change all for (auto &p : ...) to destructure the pair directly
-        - i.e. for (auto &[key, value])
+    - make sure all manual 'payload creations' are now done with
+      the appropriate serialize / deserialize methods
     - make SyncResponse mapping of form: key -> BlockNumList object
     - master restarting
         - /sync endpoint on storage server that master hits on start for each server
-        - make BATEntry include 'key'
     - fix 'no delete' bug
     - adding / removing nodes / rebalancing
     - generally fix up .then logic
@@ -1076,6 +1132,8 @@ bugs:
         just returns junk output
 
 potentially / clean up:
+    - change all for (auto &p : ...) to destructure the pair directly
+        - i.e. for (auto &[key, value])
     - separate endpoint inner classes just into own files
     - each request should have an output stream that you print
       at the end of the request (i.e. a logger)
