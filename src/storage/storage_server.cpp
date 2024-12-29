@@ -11,6 +11,7 @@
 #include "utils.hpp"
 #include "disk_storage.hpp"
 #include "storage_config.hpp"
+#include "payloads.hpp"
 
 using namespace web;
 using namespace web::http;
@@ -42,13 +43,15 @@ public:
         uint32_t diskBlockSize = config.diskBlockSize;
         uint32_t maxDataSize = 1u << config.maxDataSizePower;
         bool removeExistingStoreFile = config.removeExistingStoreFile;
+        uint32_t keyLengthMax = config.keyLengthMax;
         
         this->diskStorage = std::make_unique<DiskStorage>(
             storeDirPath,
             storeFileName,
             diskBlockSize,
             maxDataSize,
-            removeExistingStoreFile
+            removeExistingStoreFile,
+            keyLengthMax
         );
     }
 
@@ -148,7 +151,7 @@ public:
 
         task.wait();
 
-        std::vector<unsigned char> responseBuffer = createSizeResponseBuffer();
+        std::vector<unsigned char> responseBuffer = createSizeResponsePayload();
 
         // send success response
         http_response response;
@@ -174,7 +177,7 @@ public:
             request.reply(status_codes::InternalError);
         }
 
-        std::vector<unsigned char> responseBuffer = createSizeResponseBuffer();
+        std::vector<unsigned char> responseBuffer = createSizeResponsePayload();
 
         // send success response
         http_response response;
@@ -187,7 +190,7 @@ public:
     void syncHandler(http_request request)
     {
         std::cout << "GET /sync req received" << std::endl;
-        std::vector<unsigned char> responseBuffer = createSyncResponseBuffer();
+        std::vector<unsigned char> responseBuffer = createSyncResponsePayload();
 
         // send success response
         http_response response;
@@ -220,42 +223,20 @@ public:
      * 
      * 
      */
-    std::vector<unsigned char> createSyncResponseBuffer()
+    std::vector<unsigned char> createSyncResponsePayload()
     {
-        std::vector<unsigned char> responseBuffer;
-
+        std::map<std::string, std::vector<uint32_t>> keyBlockNumMap;
         std::vector<std::string> keys = this->diskStorage->getKeys();
         for (std::string &key : keys)
         {
             std::vector<uint32_t> blockNums = this->diskStorage->getBlockNums(key, this->config.dataBlockSize);
-            uint32_t numBlocks = blockNums.size();
-
-            // key
-            responseBuffer.insert(
-                responseBuffer.end(),
-                reinterpret_cast<const unsigned char*>(key.c_str()),
-                reinterpret_cast<const unsigned char*>(key.c_str() + key.size())
-            );
-
-            // num. blocks
-            responseBuffer.insert(
-                responseBuffer.end(),
-                reinterpret_cast<unsigned char*>(&numBlocks),
-                reinterpret_cast<unsigned char*>(&numBlocks + sizeof(numBlocks))
-            );
-
-            // block numbers
-            for (uint32_t blockNum : blockNums)
-            {
-                responseBuffer.insert(
-                    responseBuffer.end(),
-                    reinterpret_cast<unsigned char*>(&blockNum),
-                    reinterpret_cast<unsigned char*>(&blockNum + sizeof(blockNum))
-                );
-            }
+            keyBlockNumMap[key] = blockNums;
         }
 
-        return responseBuffer;
+        Payloads::SyncResponse syncResponse(keyBlockNumMap);
+        std::vector<unsigned char> buffer = syncResponse.serialize();
+
+        return buffer;
     }
 
     /**
@@ -269,25 +250,15 @@ public:
      *      dataUsedSize - num. bytes used of the data section
      *      dataTotalSize - total size of data section in bytes
      */
-    std::vector<unsigned char> createSizeResponseBuffer()
+    std::vector<unsigned char> createSizeResponsePayload()
     {
-        std::vector<unsigned char> responseBuffer;
-
         uint32_t dataUsedSize = this->diskStorage->dataUsedSize();
         uint32_t dataTotalSize = this->diskStorage->dataTotalSize();
 
-        responseBuffer.insert(
-            responseBuffer.end(), 
-            reinterpret_cast<unsigned char*>(&dataUsedSize),
-            reinterpret_cast<unsigned char*>(&dataUsedSize) + sizeof(dataUsedSize)
-        );
-        responseBuffer.insert(
-            responseBuffer.end(), 
-            reinterpret_cast<unsigned char*>(&dataTotalSize),
-            reinterpret_cast<unsigned char*>(&dataTotalSize) + sizeof(dataTotalSize)
-        );
+        Payloads::SizeResponse sizeResponse(dataUsedSize, dataTotalSize);
+        std::vector<unsigned char> buffer = sizeResponse.serialize();
 
-        return responseBuffer;
+        return buffer;
     }
 
     /**
@@ -310,7 +281,8 @@ public:
     /**
      * Retreives node's unique id via the environment variable `NODE_ID`.
      */
-    int getNodeIDFromEnv() {
+    int getNodeIDFromEnv() 
+    {
         const char* envNodeID = std::getenv("NODE_ID");
         return envNodeID ? std::stoi(envNodeID) : 0;
     }
@@ -325,20 +297,27 @@ public:
             this->router(request);
         });
 
-        try {
+        try 
+        {
             listener
                 .open()
                 .then([&addr](){ std::cout << "Storage server is listening at: " << addr << std::endl; });
             while (1);
-        } catch (const std::exception& e) {
+        } 
+        catch (const std::exception& e) 
+        {
             std::cout << "An error occurred: " << e.what() << std::endl;
         }
     }
 
-    void router(http_request request) {
+    void router(http_request request) 
+    {
         auto p = ApiUtils::parsePath(request.relative_uri().to_string());
         std::string endpoint = p.first;
         std::string key = p.second;
+
+        // Network truncates the key's null bytes. Resize to our fixed key size.
+        key = StringUtils::fixedSize(key, this->config.keyLengthMax);
 
         if (endpoint == U("/store"))
         {

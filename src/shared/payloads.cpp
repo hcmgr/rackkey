@@ -191,7 +191,7 @@ namespace Payloads
             // add entry
             keyBlockNumMap[key] = std::move(blockNums);
         }
-        
+
         assert(it == buffer.end());
 
         SyncResponse sr(std::move(keyBlockNumMap));
@@ -219,6 +219,22 @@ namespace Payloads
             }
         }
         return true;
+    }
+
+    std::string SyncResponse::toString()
+    {
+        std::ostringstream oss;
+        
+        for (auto &p : keyBlockNumMap)
+        {
+            const std::string& key = p.first;
+            const std::vector<uint32_t>& blockNums = p.second;
+            
+            oss << "Key: " << key << " -> Blocks: ";
+            oss << PrintUtils::printVector(blockNums);
+        }
+        
+        return oss.str();
     }
 };
 

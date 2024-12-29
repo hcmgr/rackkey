@@ -59,6 +59,7 @@ namespace Payloads
         std::vector<unsigned char> serialize();
         static SyncResponse deserialize(std::vector<unsigned char> buffer);
         bool equals(SyncResponse other);
+        std::string toString();
     };
 };
 

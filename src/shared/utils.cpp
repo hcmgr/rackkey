@@ -60,6 +60,23 @@ namespace ApiUtils {
 };
 
 namespace PrintUtils {
+
+    // template<typename T>
+    // std::string printVector(const std::vector<T>& vec) 
+    // {
+    //     std::ostringstream oss;
+    //     oss << "[ ";
+    //     for (size_t i = 0; i < vec.size(); ++i) 
+    //     {
+    //         oss << vec[i];
+    //         if (i != vec.size() - 1) {
+    //             oss << ", ";
+    //         }
+    //     }
+    //     oss << " ]";
+    //     return oss.str();
+    // }
+
     /**
      * Prints given 32-bit integer in hex form
      */
@@ -116,11 +133,14 @@ namespace StringUtils
      */
     std::string fixedSize(std::string s, uint32_t size)
     {
-        if (s.size() < size)
-            s.append(size - s.size(), '\0');
-        else
-            s = s.substr(0, size);
+        s.resize(size, '\0');
         return s;
+
+        // if (s.size() < size)
+        //     s.append(size - s.size(), '\0');
+        // else
+        //     s = s.substr(0, size);
+        // return s;
     }
 }
 

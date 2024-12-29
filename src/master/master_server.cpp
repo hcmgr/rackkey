@@ -77,7 +77,7 @@ public:
           config(configFilePath)
     {
         initialiseStorageNodes();
-        syncWithStorageNodes();
+        // syncWithStorageNodes();
     }
 
     ~MasterServer() {}
@@ -99,7 +99,7 @@ public:
          * Requests all of {KEY}'s blocks from the storage cluster
          * and returns them in order.
          */
-        void getHandler(http_request request, const std::string key) 
+        void getHandler(http_request request, std::string key) 
         {
             std::cout << "GET req received: " << key << std::endl;
 
@@ -204,6 +204,8 @@ public:
 
             std::cout << "GET: successful" << std::endl;
 
+            server->syncWithStorageNodes();
+
             // send success response
             http_response response(status_codes::OK);
             response.set_body(payloadBuffer);
@@ -280,7 +282,7 @@ public:
          * Given {KEY} and a data payload, breaks payload into blocks and 
          * distributes them across the storage cluster.
          */
-        void putHandler(http_request request, const std::string key) 
+        void putHandler(http_request request, std::string key) 
         {
             std::cout << "PUT req received: " << key << std::endl;
 
@@ -503,7 +505,7 @@ public:
          * 
          * Rebalancing will likely require block-level deletion capability.
          */
-        void deleteHandler(http_request request, const std::string key) 
+        void deleteHandler(http_request request, std::string key) 
         {
             std::cout << "DEL req received: " << key << std::endl;
 
@@ -760,13 +762,22 @@ public:
 
     void syncWithStorageNodes()
     {
+        std::vector<pplx::task<void>> syncTasks;
+        for (auto &p : this->storageNodes)
+        {
+            uint32_t nodeId = p.first;
+            auto task = syncWithStorageNode(nodeId);
+            syncTasks.push_back(task);
+        }
 
+        auto task = pplx::when_all(syncTasks.begin(), syncTasks.end());
+        task.wait();
     }
 
     /**
      * 
      */
-    void syncWithStorageNode(uint32_t storageNodeId)
+    pplx::task<void> syncWithStorageNode(uint32_t storageNodeId)
     {
         std::shared_ptr<StorageNode> sn = this->storageNodes[storageNodeId];
 
@@ -791,37 +802,9 @@ public:
 
         .then([=](std::vector<unsigned char> payload)
         {
-            processSyncResponse(payload);
+            Payloads::SyncResponse syncResponse = Payloads::SyncResponse::deserialize(payload);
         });
-
-    }
-
-    void processSyncResponse(std::vector<unsigned char> &payload)
-    {
-        auto it = payload.begin();
-        while (it < payload.end())
-        {
-            // key
-            std::string key;
-
-            // num. blocks
-            uint32_t numBlocks;
-            std::memcpy(&numBlocks, &(*it), sizeof(numBlocks));
-            it += sizeof(numBlocks);
-
-            // block nums
-            std::vector<uint32_t> blockNums;
-            for (int i = 0; i < numBlocks; i++)
-            {
-                uint32_t blockNum;
-                std::memcpy(&blockNum, &(*it), sizeof(blockNum));
-                blockNums.push_back(blockNum);
-                it += sizeof(blockNum);
-            }
-        }
-        
-        assert(it == payload.end());
-
+        return task;
     }
 
     /**
@@ -959,22 +942,11 @@ public:
         std::shared_ptr<StorageNode> sn,
         std::vector<unsigned char> &sizeResponseBuffer)
     {
-        uint32_t dataUsedSize;
-        uint32_t dataTotalSize;
-        uint32_t dataFreeSize;
+        Payloads::SizeResponse sizeResponse = Payloads::SizeResponse::deserialize(sizeResponseBuffer);
 
-        auto it = sizeResponseBuffer.begin();
-
-        std::memcpy(&dataUsedSize, &(*it), sizeof(dataUsedSize));
-        it += sizeof(dataUsedSize);
-        std::memcpy(&dataTotalSize, &(*it), sizeof(dataTotalSize));
-        it += sizeof(dataTotalSize);
-
-        assert(it == sizeResponseBuffer.end());
-
-        sn->stats.dataBytesUsed = dataUsedSize;
-        sn->stats.dataBytesFree = dataTotalSize - dataUsedSize;
-        sn->stats.dataBytesTotal = dataTotalSize;
+        sn->stats.dataBytesUsed = sizeResponse.dataUsedSize;
+        sn->stats.dataBytesTotal = sizeResponse.dataTotalSize;
+        sn->stats.dataBytesFree = sizeResponse.dataTotalSize - sizeResponse.dataUsedSize;
         return;
     }
 
@@ -1055,11 +1027,9 @@ public:
 
 void run()
 {    
-    // std::string configFilePath = "../src/config.json";
-    // MasterServer masterServer = MasterServer(configFilePath);
-    // masterServer.startServer();
-
-    PayloadsTests::runAll();
+    std::string configFilePath = "../src/config.json";
+    MasterServer masterServer = MasterServer(configFilePath);
+    masterServer.startServer();
 }
 
 int main() 
@@ -1069,6 +1039,8 @@ int main()
 
 /*
 TODO:
+    - change all for (auto &p : ...) to destructure the pair directly
+        - i.e. for (auto &[key, value])
     - make SyncResponse mapping of form: key -> BlockNumList object
     - master restarting
         - /sync endpoint on storage server that master hits on start for each server
@@ -1103,7 +1075,7 @@ bugs:
     - when num healthy nodes < R, should throw an error (doesn't right now),
         just returns junk output
 
-potentially:
+potentially / clean up:
     - separate endpoint inner classes just into own files
     - each request should have an output stream that you print
       at the end of the request (i.e. a logger)
@@ -1117,6 +1089,8 @@ potentially:
         write python script to generate one (probs makes stuff just less clear though)
     - official master server testing
         - mocking endpoints?
+    - just pass StorageConfig to DiskStorage directly, instead of passing
+      each config parameter manually
 
 MASTER RESTARTING:
     - persist:

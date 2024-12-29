@@ -7,6 +7,7 @@
 #include "block.hpp"
 #include "crypto.hpp"
 #include "free_space.hpp"
+#include "storage_config.hpp"
 
 #include "test_utils.hpp"
 
@@ -105,7 +106,8 @@ public:
         std::string storeFileName = "store",
         uint32_t diskBlockSize = 4096,
         uint32_t maxDataSize = 1u << 30,
-        bool removeExistingStoreFile = false
+        bool removeExistingStoreFile = false,
+        uint32_t keyLengthMax = 50
     );
 
     ~DiskStorage();
@@ -201,6 +203,7 @@ private:
 
     fs::path storeFilePath;
     std::fstream storeFile;
+    uint32_t keyLengthMax;
 
     /**
      * Either creates a new store file, or initialises from an existing one.

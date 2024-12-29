@@ -174,10 +174,12 @@ DiskStorage::DiskStorage(
     std::string storeFileName,
     uint32_t diskBlockSize,
     uint32_t maxDataSize,
-    bool removeExistingStore
+    bool removeExistingStore,
+    uint32_t keyLengthMax
 )
 {
     this->storeFilePath = fs::path(storeDirPath) / storeFileName;
+    this->keyLengthMax = keyLengthMax;
     initialiseStorage(diskBlockSize, maxDataSize, removeExistingStore);
 }
 
@@ -455,7 +457,13 @@ std::vector<std::string> DiskStorage::getKeys()
     std::vector<std::string> keys;
 
     for (BATEntry &be : this->bat.table)
-        keys.push_back(std::string(be.key));
+    {
+        std::string key = std::string(be.key);
+
+        // ensure key size is our set fixed size
+        key = StringUtils::fixedSize(key, this->keyLengthMax);
+        keys.push_back(key);
+    }
 
     return keys;
 }
@@ -780,8 +788,6 @@ bool DiskStorage::headerValid()
 {
     return this->header.magicNumber == this->magicNumber;
 }
-
-
 
 ////////////////////////////////////////////
 // DiskStorage tests

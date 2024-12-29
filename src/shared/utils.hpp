@@ -42,18 +42,34 @@ namespace PrintUtils {
      * Pretty-print std::vector<T>
      */
     template<typename T>
-    void printVector(const std::vector<T>& vec) 
+    std::string printVector(const std::vector<T>& vec) 
     {
-        std::cout << "[ ";
+        std::ostringstream oss;
+        oss << "[ ";
         for (size_t i = 0; i < vec.size(); ++i) 
         {
-            std::cout << vec[i];
+            oss << vec[i];
             if (i != vec.size() - 1) {
-                std::cout << ", ";
+                oss << ", ";
             }
         }
-        std::cout << " ]" << std::endl;
+        oss << " ]";
+        return oss.str();
     }
+
+    // template<typename T>
+    // void printVector(const std::vector<T>& vec) 
+    // {
+    //     std::cout << "[ ";
+    //     for (size_t i = 0; i < vec.size(); ++i) 
+    //     {
+    //         std::cout << vec[i];
+    //         if (i != vec.size() - 1) {
+    //             std::cout << ", ";
+    //         }
+    //     }
+    //     std::cout << " ]" << std::endl;
+    // }
 
     /**
      * Pretty-print std::unordered_set<T>
