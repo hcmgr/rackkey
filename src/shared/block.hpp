@@ -90,4 +90,5 @@ public:
 namespace BlockTests
 {
     void testBlockSerializeDeserialize();
+    void runAll();
 };

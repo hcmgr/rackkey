@@ -103,6 +103,15 @@ namespace PrintUtils {
     std::string formatNumBytes(uint64_t bytes);
 };
 
+namespace StringUtils
+{
+    /**
+     * Returns new copy of `str`, truncated/padded to be
+     * of size `size`.
+     */
+    std::string fixedSize(std::string str, uint32_t size);
+}
+
 namespace MathUtils
 {
     /**

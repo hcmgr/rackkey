@@ -108,6 +108,22 @@ namespace PrintUtils {
     }
 }
 
+namespace StringUtils
+{
+    /**
+     * Returns new copy of `s`, truncated/padded to be
+     * of size `size`.
+     */
+    std::string fixedSize(std::string s, uint32_t size)
+    {
+        if (s.size() < size)
+            s.append(size - s.size(), '\0');
+        else
+            s = s.substr(0, size);
+        return s;
+    }
+}
+
 namespace MathUtils
 {
     /**
@@ -152,6 +168,22 @@ namespace FileSystemUtils
 ////////////////////////////////////////////
 namespace UtilsTests
 {
+    void runAll()
+    {
+        std::cerr << "###################################" << std::endl;
+        std::cerr << "Utils Tests" << std::endl;
+        std::cerr << "###################################" << std::endl;
+
+        std::vector<std::pair<std::string, std::function<void()>>> tests = {
+            TEST(testParsePath)
+        };
+
+        for (auto &[name, func] : tests)
+        {
+            TestUtils::runTest(name, func);
+        }
+    }
+
     void testParsePath()
     {
         std::vector<std::string> paths = {
@@ -174,22 +206,6 @@ namespace UtilsTests
         {
             auto p = ApiUtils::parsePath(paths[i]);
             ASSERT_THAT(p == expectedParsedPaths[i]);
-        }
-    }
-
-    void runAll()
-    {
-        std::cerr << "###################################" << std::endl;
-        std::cerr << "Utils Tests" << std::endl;
-        std::cerr << "###################################" << std::endl;
-
-        std::vector<std::pair<std::string, std::function<void()>>> tests = {
-            TEST(testParsePath)
-        };
-
-        for (auto &[name, func] : tests)
-        {
-            TestUtils::runTest(name, func);
         }
     }
 };

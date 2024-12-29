@@ -73,7 +73,9 @@ BATEntry::BATEntry()
 {
 }
 
-BATEntry::BATEntry(uint32_t keyHash, 
+BATEntry::BATEntry(
+    std::string &key,
+    uint32_t keyHash, 
     uint32_t startingDiskBlockNum,
     uint32_t numBytes
 )
@@ -81,11 +83,14 @@ BATEntry::BATEntry(uint32_t keyHash,
       startingDiskBlockNum(startingDiskBlockNum),
       numBytes(numBytes)
 {
+    std::strncpy(this->key, key.c_str(), sizeof(this->key) - 1);
+    this->key[sizeof(this->key) - 1] = '\0';
 }
 
 bool BATEntry::equals(BATEntry &other)
 {
     return (
+        std::string(key) == std::string(other.key) &&
         keyHash == other.keyHash &&
         startingDiskBlockNum == other.startingDiskBlockNum &&
         numBytes == other.numBytes
@@ -96,7 +101,8 @@ std::string BATEntry::toString()
 {
     std::ostringstream oss;
 
-    oss << "    keyHash: 0x" << std::hex << std::setw(8) << std::setfill('0') << keyHash << "\n"
+    oss << "    key: " << std::string(key) << "\n"
+        << "    keyHash: 0x" << std::hex << std::setw(8) << std::setfill('0') << keyHash << "\n"
         << "    startingDiskBlockNum: " << std::dec << startingDiskBlockNum << "\n"
         << "    numBytes: " << numBytes << "\n";
     return oss.str();
@@ -162,9 +168,7 @@ std::string BAT::toString()
 // DiskStorage - public methods
 ////////////////////////////////////////////
 
-/**
- * Param constructor
- */
+/* Param constructor */
 DiskStorage::DiskStorage(
     std::string storeDirPath,
     std::string storeFileName,
@@ -177,22 +181,19 @@ DiskStorage::DiskStorage(
     initialiseStorage(diskBlockSize, maxDataSize, removeExistingStore);
 }
 
-DiskStorage::~DiskStorage()
-{
-}
+DiskStorage::~DiskStorage() {}
 
 /**
- * Retreive and return all blocks of the given key.
+ * Retreive blocks `requestedBlockNums` of key `key`,
+ * each of which should have a data size of `dataBlockSize`.
  * 
  * Throws: 
  *      runtime_error() - on any error during the reading process
  * 
  * NOTE:
  *
- * `readBuffer` is the buffer we read the raw block data into 
- * and it may be emptied, as it is resized as needed.  We pass 
- * this in so that the data the block pointers reference does 
- * not get de-allocated.
+ * `readBuffer` is the buffer we read the raw block data into.
+ * i.e. block pointers point to positions in `readBuffer`.
  */
 std::vector<Block> DiskStorage::readBlocks(
     std::string key, 
@@ -242,7 +243,7 @@ std::vector<Block> DiskStorage::readBlocks(
     {
         // read block num
         uint32_t blockNum;
-        std::memcpy(&blockNum, &(*iter), sizeof(uint32_t));
+        std::memcpy(&blockNum, &(*iter), sizeof(blockNum));
         iter += sizeof(uint32_t);
 
         // read data
@@ -402,7 +403,7 @@ void DiskStorage::writeBlocks(std::string key, std::vector<Block> dataBlocks)
         freeSpaceMap.allocateNBlocks(startingDiskBlockNum, N);
 
         // insert new entry
-        BATEntry batEntry(Crypto::sha256_32(key), startingDiskBlockNum, numTotalBytes);
+        BATEntry batEntry(key, Crypto::sha256_32(key), startingDiskBlockNum, numTotalBytes);
         bat.table.push_back(std::move(batEntry));
         bat.numEntries++;
     }
@@ -447,6 +448,119 @@ void DiskStorage::deleteBlocks(std::string key)
 }
 
 /**
+ * Returns keys this node stores.
+ */
+std::vector<std::string> DiskStorage::getKeys()
+{
+    std::vector<std::string> keys;
+
+    for (BATEntry &be : this->bat.table)
+        keys.push_back(std::string(be.key));
+
+    return keys;
+}
+
+/**
+ * Returns block numbers this node stores for the 
+ * given key `key`.
+ */
+std::vector<uint32_t> DiskStorage::getBlockNums(std::string key, uint32_t dataBlockSize)
+{
+    auto entry = this->bat.findBATEntry(Crypto::sha256_32(key));
+    if (entry == std::nullopt)
+        throw std::runtime_error("readBlocks() - no BAT entry found for given key: " + key);
+
+    auto batEntry = *entry;
+    std::vector<unsigned char> readBuffer;
+
+    uint32_t offset = getDiskBlockOffset(batEntry->startingDiskBlockNum);
+    uint32_t totalNumBytes = batEntry->numBytes;
+
+    readBuffer.resize(totalNumBytes);
+
+    this->storeFile.open(storeFilePath, std::fstream::in | std::fstream::out);
+    if (this->storeFile.is_open())
+    {
+        this->storeFile.seekg(offset);
+        this->storeFile.read(reinterpret_cast<char*>(readBuffer.data()), totalNumBytes);
+
+        if (this->storeFile.fail() || this->storeFile.bad())
+            throw std::runtime_error("getBlockNums() - bad read of cumulative block data from disk");
+
+        this->storeFile.close();
+    }
+    else
+        throw std::runtime_error("failed to open file for reading!");
+    
+    if (readBuffer.size() != totalNumBytes)
+        throw std::runtime_error("getBlockNums() - read buffer size != on-disk size");
+    
+    std::vector<uint32_t> blockNums;
+    
+    auto iter = readBuffer.begin();
+    while (iter < readBuffer.end())
+    {
+        // read block num
+        uint32_t blockNum;
+        std::memcpy(&blockNum, &(*iter), sizeof(blockNum));
+        blockNums.push_back(blockNum);
+        iter += sizeof(uint32_t);
+
+        // move pointer to next data block
+        uint32_t dataSize = std::min(
+            dataBlockSize,
+            static_cast<uint32_t>(std::distance(iter, readBuffer.end()))
+        );
+        iter += dataSize;
+    }
+
+    return blockNums;
+}
+
+/**
+ * Reads `N` raw disk blocks into a buffer, starting at block `startingBlockNum`.
+ * 
+ * NOTE: used for debugging purposes mostly; such 
+ *       buffers can be printed nicely using
+ *       PrintUtils::printVector() (see utils.hpp)
+ */
+std::vector<unsigned char> DiskStorage::readRawDiskBlocks(uint32_t startingDiskBlockNum, uint32_t N)
+{
+    uint32_t numBytes = N * this->header.diskBlockSize;
+    uint32_t offset = getDiskBlockOffset(startingDiskBlockNum);
+
+    std::vector<unsigned char> buffer(numBytes);
+
+    this->storeFile.open(storeFilePath, std::fstream::in | std::fstream::out);
+    if (this->storeFile.is_open())
+    {
+        this->storeFile.seekg(offset);
+        this->storeFile.read(reinterpret_cast<char*>(buffer.data()), numBytes);
+        this->storeFile.close();
+    }
+    else
+        throw std::runtime_error("failed to open file for reading!");
+    
+    return buffer;
+}
+
+/**
+ * Returns offset of disk block `diskBlockNum`.
+ */
+uint32_t DiskStorage::getDiskBlockOffset(uint32_t diskBlockNum)
+{
+    return this->header.blockStoreOffset + (this->header.diskBlockSize * diskBlockNum);
+}
+
+/**
+ * Returns number of disk blocks `numBytes` bytes takes up.
+ */
+uint32_t DiskStorage::getNumDiskBlocks(uint32_t numDataBytes)
+{
+    return MathUtils::ceilDiv(numDataBytes, this->header.diskBlockSize);
+}
+
+/**
  * Returns #bytes used of data section
  */
 uint32_t DiskStorage::dataUsedSize()
@@ -468,22 +582,6 @@ uint32_t DiskStorage::dataTotalSize()
 uint32_t DiskStorage::totalFileSize()
 {
     return sizeof(this->header) + this->header.batSize + this->header.maxDataSize;
-}
-
-/**
- * Returns offset of disk block `diskBlockNum`.
- */
-uint32_t DiskStorage::getDiskBlockOffset(uint32_t diskBlockNum)
-{
-    return this->header.blockStoreOffset + (this->header.diskBlockSize * diskBlockNum);
-}
-
-/**
- * Returns number of disk blocks `numBytes` bytes takes up.
- */
-uint32_t DiskStorage::getNumDiskBlocks(uint32_t numDataBytes)
-{
-    return MathUtils::ceilDiv(numDataBytes, this->header.diskBlockSize);
 }
 
 ////////////////////////////////////////////
@@ -525,6 +623,7 @@ void DiskStorage::initialiseStorage(
         freeSpaceMap.initialise(getNumDiskBlocks(maxDataSize));
 
         std::cout << "Created new store file: " << this->storeFilePath << std::endl;
+        std::cout << this->header.toString() << std::endl;
     }
 }
 
@@ -682,32 +781,7 @@ bool DiskStorage::headerValid()
     return this->header.magicNumber == this->magicNumber;
 }
 
-/**
- * Reads `N` raw disk blocks into a buffer, starting at block `startingBlockNum`.
- * 
- * NOTE: used for debugging purposes mostly; such 
- *       buffers can be printed nicely using
- *       PrintUtils::printVector() (see utils.hpp)
- */
-std::vector<unsigned char> DiskStorage::readRawDiskBlocks(uint32_t startingDiskBlockNum, uint32_t N)
-{
-    uint32_t numBytes = N * this->header.diskBlockSize;
-    uint32_t offset = getDiskBlockOffset(startingDiskBlockNum);
 
-    std::vector<unsigned char> buffer(numBytes);
-
-    this->storeFile.open(storeFilePath, std::fstream::in | std::fstream::out);
-    if (this->storeFile.is_open())
-    {
-        this->storeFile.seekg(offset);
-        this->storeFile.read(reinterpret_cast<char*>(buffer.data()), numBytes);
-        this->storeFile.close();
-    }
-    else
-        throw std::runtime_error("failed to open file for reading!");
-    
-    return buffer;
-}
 
 ////////////////////////////////////////////
 // DiskStorage tests
@@ -1000,6 +1074,41 @@ namespace DiskStorageTests
 
         ASSERT_THAT(ds.bat.numEntries == 0 && ds.bat.table.size() == 0);
 
+        teardown();
+    }
+
+    void testCanGetKeys()
+    {
+
+    }
+
+    void testCanGetKeysBlockNums()
+    {
+        setup();
+
+        uint32_t dataBlockSize = 40;
+        uint32_t diskBlockSize = 20;
+        DiskStorage ds = DiskStorage("rackkey", "store", diskBlockSize, 1u << 10);
+
+        // write some blocks
+        std::string key = "archive.zip";
+        uint32_t N = 2;
+        uint32_t numDataBytes = N * dataBlockSize;
+        std::vector<std::vector<unsigned char>> writeDataBuffers;
+
+        auto p = Block::generateRandom(key, dataBlockSize, numDataBytes, writeDataBuffers);
+        std::vector<Block> writeBlocks = p.first;
+        std::unordered_set<uint32_t> blockNumsWritten = p.second;
+        ds.writeBlocks(key, writeBlocks);
+
+        // retreive blocks nums for `key`
+        std::vector<uint32_t> blockNumsRead = ds.getBlockNums(key, dataBlockSize);
+
+        ASSERT_THAT(blockNumsRead.size() == blockNumsWritten.size());
+
+        for (auto &bn : blockNumsRead)
+            ASSERT_THAT(blockNumsWritten.find(bn) != blockNumsWritten.end());
+        
         teardown();
     }
 
@@ -1321,6 +1430,7 @@ namespace DiskStorageTests
             TEST(testCanWriteAndReadMultipleKeysBlocks),
             TEST(testCanReadSubsetOfBlocks),
             TEST(testCanDeleteOneKeysBlocks),
+            TEST(testCanGetKeysBlockNums),
             TEST(testCanBuildUpFreeSpaceMapFromExistingFile),
             TEST(testCanOverwriteExistingKey),
             TEST(testFragmentedWrite),

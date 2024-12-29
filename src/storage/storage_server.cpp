@@ -57,7 +57,7 @@ public:
      */
     void getHandler(http_request request, std::string key)
     {
-        std::cout << "GET req received: " << key << std::endl;
+        std::cout << "GET /store req received: " << key << std::endl;
 
         std::vector<unsigned char> readBuffer;
         std::vector<Block> blocks;
@@ -119,7 +119,7 @@ public:
      */
     void putHandler(http_request request, std::string key)
     {
-        std::cout << "PUT req received: " << key << std::endl;
+        std::cout << "PUT /store req received: " << key << std::endl;
 
         auto payloadBuffer = std::make_shared<std::vector<unsigned char>>();
 
@@ -163,7 +163,7 @@ public:
      */
     void deleteHandler(http_request request, std::string key)
     {
-        std::cout << "DEL req received: " << key << std::endl;
+        std::cout << "DEL /store req received: " << key << std::endl;
         try
         {
             diskStorage->deleteBlocks(key);
@@ -184,21 +184,91 @@ public:
         return;
     }
 
-    /**
-     * Responds to the master server's health check.
-     */
-    void healthCheckHandler(http_request request)
+    void syncHandler(http_request request)
     {
-        /**
-         * If it can receive the request, it's healthy.
-         * 
-         * NOTE: In future, perhaps also check health of disk
-         *       storage.
-         */
-        request.reply(status_codes::OK);
+        std::cout << "GET /sync req received" << std::endl;
+        std::vector<unsigned char> responseBuffer = createSyncResponseBuffer();
+
+        // send success response
+        http_response response;
+        response.set_status_code(status_codes::OK);
+        response.set_body(responseBuffer);
+        request.reply(response);
         return;
     }
 
+    /**
+     * The response payload of a /sync GET request is a 'sync response', 
+     * which is of the form:
+     * 
+     *      ----
+     *      key0
+     *      numBlocks      
+     *      blockNumA
+     *      blockNumB
+     *      ...
+     *      ----
+     *      key1
+     *      numBlocks
+     *      blockNumA
+     *      blockNumB
+     *      ...
+     *      ----
+     *      ...
+     * 
+     * NOTE:
+     * 
+     * 
+     */
+    std::vector<unsigned char> createSyncResponseBuffer()
+    {
+        std::vector<unsigned char> responseBuffer;
+
+        std::vector<std::string> keys = this->diskStorage->getKeys();
+        for (std::string &key : keys)
+        {
+            std::vector<uint32_t> blockNums = this->diskStorage->getBlockNums(key, this->config.dataBlockSize);
+            uint32_t numBlocks = blockNums.size();
+
+            // key
+            responseBuffer.insert(
+                responseBuffer.end(),
+                reinterpret_cast<const unsigned char*>(key.c_str()),
+                reinterpret_cast<const unsigned char*>(key.c_str() + key.size())
+            );
+
+            // num. blocks
+            responseBuffer.insert(
+                responseBuffer.end(),
+                reinterpret_cast<unsigned char*>(&numBlocks),
+                reinterpret_cast<unsigned char*>(&numBlocks + sizeof(numBlocks))
+            );
+
+            // block numbers
+            for (uint32_t blockNum : blockNums)
+            {
+                responseBuffer.insert(
+                    responseBuffer.end(),
+                    reinterpret_cast<unsigned char*>(&blockNum),
+                    reinterpret_cast<unsigned char*>(&blockNum + sizeof(blockNum))
+                );
+            }
+        }
+
+        return responseBuffer;
+    }
+
+    /**
+     * The response payload of a /store PUT/DEL request is a 'size response',
+     * which is of the form:
+     * 
+     *      dataUsedSize - 4 bytes
+     *      dataTotalSize - 4 bytes
+     * 
+     * where:
+     *      dataUsedSize - num. bytes used of the data section
+     *      dataTotalSize - total size of data section in bytes
+     */
     std::vector<unsigned char> createSizeResponseBuffer()
     {
         std::vector<unsigned char> responseBuffer;
@@ -218,6 +288,23 @@ public:
         );
 
         return responseBuffer;
+    }
+
+    /**
+     * Responds to the master server's health check.
+     */
+    void healthCheckHandler(http_request request)
+    {
+        // std::cout << "GET /health req received" << std::endl;
+
+        /**
+         * If it can receive the request, it's healthy.
+         * 
+         * NOTE: In future, perhaps also check health of disk
+         *       storage.
+         */
+        request.reply(status_codes::OK);
+        return;
     }
 
     /**
@@ -253,8 +340,6 @@ public:
         std::string endpoint = p.first;
         std::string key = p.second;
 
-        std::cout << "REQ RECEIVED: " << endpoint << " " << key << std::endl;
-
         if (endpoint == U("/store"))
         {
             if (request.method() == methods::GET)
@@ -269,6 +354,11 @@ public:
             if (request.method() == methods::GET)
                 this->healthCheckHandler(request);
         }
+        else if (endpoint == U("/sync"))
+        {
+            if (request.method() == methods::GET)
+                this->syncHandler(request);
+        }
         else 
         {
             std::cout << "Endpoint not implemented: " << endpoint << std::endl;
@@ -280,9 +370,11 @@ public:
 
 void run()
 {
-    std::string configFilePath = "/app/config.json";
+    // std::string configFilePath = "/app/config.json";
+    std::string configFilePath = "../src/config.json";
     StorageServer storageServer = StorageServer(configFilePath);
     storageServer.startServer();
+    // DiskStorageTests::runAll();
 }
 
 int main()

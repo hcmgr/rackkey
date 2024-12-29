@@ -5,6 +5,7 @@
 
 #include "block.hpp"
 #include "utils.hpp"
+#include "test_utils.hpp"
 
 ////////////////////////////////////////////
 // Block methods
@@ -176,9 +177,11 @@ std::string Block::toString(bool showData)
  * Generate `N` blocks with total data size `numBytes`, each with
  * key `key`.
  * 
- * Returns pair of the form {block list, block numbers}
+ * Returns pair of the form {block list, block num set}.
  * 
- * NOTE: used to write tests for Block and other modules.
+ * NOTE: 
+ * 
+ * Mostly used to write tests for Block and other modules.
  */
 std::pair<std::vector<Block>, std::unordered_set<uint32_t>> Block::generateRandom(
     std::string key, 
@@ -256,6 +259,22 @@ namespace BlockTests
         std::cout << "After Deserialization:" << std::endl << std::endl;
         for (Block block : deserializedBlocks) {
             std::cout << block.toString() << std::endl;
+        }
+    }
+
+    void runAll()
+    {
+        std::cerr << "###################################" << std::endl;
+        std::cerr << "Block Tests" << std::endl;
+        std::cerr << "###################################" << std::endl;
+
+        std::vector<std::pair<std::string, std::function<void()>>> tests = {
+            TEST(testBlockSerializeDeserialize)
+        };
+
+        for (auto &[name, func] : tests)
+        {
+            TestUtils::runTest(name, func);
         }
     }
 }

@@ -44,13 +44,16 @@ struct __attribute__((packed)) Header
  */
 struct __attribute__((packed)) BATEntry
 {
+    char key[50];
     uint32_t keyHash;
     uint32_t startingDiskBlockNum;
     uint32_t numBytes;
 
     BATEntry();
 
-    BATEntry(uint32_t keyHash, 
+    BATEntry(
+        std::string &key,
+        uint32_t keyHash, 
         uint32_t startingDiskBlockNum,
         uint32_t numBytes
     );
@@ -96,9 +99,7 @@ public:
     /* Free space map for our block store */
     FreeSpaceMap freeSpaceMap;
 
-    /**
-     * Param constructor
-     */
+    /* Param constructor */
     DiskStorage(
         std::string storeDirPath = "/rackkey",
         std::string storeFileName = "store",
@@ -110,20 +111,16 @@ public:
     ~DiskStorage();
 
     /**
-     * Retreive and return ALL blocks stored on this node for 
-     * the given `key`.
+     * Retreive blocks `requestedBlockNums` of key `key`,
+     * each of which should have a data size of `dataBlockSize`.
      * 
      * Throws: 
      *      runtime_error() - on any error during the reading process
      * 
      * NOTE:
      *
-     * `readBuffer` is the buffer we read the raw block data into 
-     * and it may be emptied, as it is resized as needed.
-     * 
-     * 
-     * We pass this in so that the data the block pointers reference
-     * does not get de-allocated.
+     * `readBuffer` is the buffer we read the raw block data into.
+     * i.e. block pointers point to positions in `readBuffer`.
      */
     std::vector<Block> readBlocks(
         std::string key, 
@@ -153,13 +150,35 @@ public:
     void deleteBlocks(std::string key);
 
     /**
+     * Returns list of keys this node stores.
+     */
+    std::vector<std::string> getKeys();
+
+    /**
+     * Returns block numbers this node stores for the 
+     * given key `key`.
+     */
+    std::vector<uint32_t> getBlockNums(std::string key, uint32_t dataBlockSize);
+
+    /**
      * Reads `N` raw disk blocks into a buffer, starting at block `startingBlockNum`.
      * 
-     * NOTE: used for debugging purposes mostly; such 
-     *       buffers can be printed nicely using
-     *       PrintUtils::printVector() (see utils.hpp)
+     * NOTE: 
+     * 
+     * Most used for debugging purposes. Such buffers can be
+     * printed nicely using PrintUtils::printVector() (see utils.hpp).
      */
     std::vector<unsigned char> readRawDiskBlocks(uint32_t startingDiskBlockNum, uint32_t N);
+
+    /**
+     * Returns offset of disk block `diskBlockNum`.
+     */
+    uint32_t getDiskBlockOffset(uint32_t diskBlockNum);
+
+    /**
+     * Returns number of disk blocks `numDataBytes` bytes takes up.
+     */
+    uint32_t getNumDiskBlocks(uint32_t numDataBytes);
 
     /**
      * Returns num. bytes used of data section
@@ -175,16 +194,6 @@ public:
      * Returns total size (in bytes) of the store file.
      */
     uint32_t totalFileSize();
-
-    /**
-     * Returns offset of disk block `diskBlockNum`.
-     */
-    uint32_t getDiskBlockOffset(uint32_t diskBlockNum);
-
-    /**
-     * Returns number of disk blocks `numDataBytes` bytes takes up.
-     */
-    uint32_t getNumDiskBlocks(uint32_t numDataBytes);
 
 private:    
 

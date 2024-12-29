@@ -15,11 +15,13 @@
 
 #include "storage_node.hpp"
 #include "hash_ring.hpp"
+#include "master_config.hpp"
+
 #include "utils.hpp"
 #include "config.hpp"
 #include "block.hpp"
 #include "test_utils.hpp"
-#include "master_config.hpp"
+#include "payloads.hpp"
 
 using namespace web;
 using namespace web::http;
@@ -35,9 +37,13 @@ public:
     HashRing hashRing;
 
     /**
-     * Stores mapping of the form: key -> {block num -> storage node id set}.
+     * Stores the location of blocks on our storage cluster.
      * 
-     * i.e. for each KEY, we store a mapping from block number to a list of storage node ids.
+     * Mapping is of the form: { key -> {block num -> storage node id set} }.
+     * 
+     * i.e. for each key, we store a mapping from block number to a set 
+     * of storage node ids, which represents the set of storage nodes the
+     * given block is stored on.
      * 
      * NOTE: 
      * 
@@ -46,7 +52,8 @@ public:
     std::map<std::string, std::shared_ptr<std::map<uint32_t, std::set<uint32_t>>>> keyBlockNodeMap;
 
     /**
-     * Stores our storage nodes.
+     * Stores our storage nodes, which are represented as StorageNode
+     * objects (see storage_node.hpp).
      * 
      * Mapping is of the form: { storage node id -> StorageNode object }.
      */
@@ -55,11 +62,12 @@ public:
     /**
      * Stores currently open connections to storage nodes.
      * 
-     * Mapping is of the form: storage node id -> http_client object.
+     * Mapping is of the form: { storage node id -> http_client object }.
      */
     std::map<uint32_t, std::shared_ptr<http_client>> openConnections;
     std::mutex openConnectionsMutex;
 
+    /* Master-specific config parameters read from config.json */
     MasterConfig config;
 
     /* Default constructor */
@@ -68,7 +76,8 @@ public:
           keyBlockNodeMap(),
           config(configFilePath)
     {
-        addInitialStorageNodes();
+        initialiseStorageNodes();
+        syncWithStorageNodes();
     }
 
     ~MasterServer() {}
@@ -203,6 +212,8 @@ public:
         }
 
         /**
+         * Helper for getHandler().
+         * 
          * Retreives blocks `blockNums` for key `key` from node `storageNodeId`.
          * 
          * NOTE:
@@ -222,7 +233,7 @@ public:
             auto client = server->getHttpClient(sn);
 
             /**
-             * Serialise block numbers to send as payload.
+             * Serialize block numbers to send as payload.
              */
             std::vector<unsigned char> requestPayload;
             for (uint32_t bn : blockNums)
@@ -251,7 +262,7 @@ public:
                 return response.extract_vector();
             })
 
-            // deserialise payload and populate block map
+            // deserialize payload and populate block map
             .then([=](std::vector<unsigned char> payload)
             {
                 *responsePayload = payload;
@@ -404,6 +415,8 @@ public:
         }
 
         /**
+         * Helper for putHandler().
+         * 
          * Sends the given list of blocks `blocks` for key `key` to storage
          * node `storageNodeId`.
          * 
@@ -553,6 +566,8 @@ public:
         }
 
         /**
+         * Helper for deleteHandler().
+         * 
          * Deletes all blocks correpsonding to key `key` from node `storageNodeId`.
          */
         pplx::task<void> deleteBlocks(uint32_t storageNodeId, std::string key)
@@ -562,11 +577,11 @@ public:
             auto client = server->getHttpClient(sn);
 
             // build and send request
-            http_request req = http_request();
-            req.set_method(methods::DEL);
-            req.set_request_uri(U("/store/" + key));
+            http_request request = http_request();
+            request.set_method(methods::DEL);
+            request.set_request_uri(U("/store/" + key));
 
-            auto task = client->request(req)
+            auto task = client->request(request)
             .then([=](http_response response)
             {
                 if (response.status_code() != status_codes::OK)
@@ -728,10 +743,10 @@ public:
     };
 
     /**
-     * Add our pre-defined storage nodes and add their virtual nodes
+     * Initialise our storages nodes and add their virtual nodes 
      * to the hash ring.
      */
-    void addInitialStorageNodes() {
+    void initialiseStorageNodes() {
         for (std::string ipPort : this->config.storageNodeIPs) 
         {
             auto storageNode = std::make_shared<StorageNode>(ipPort, this->config.numVirtualNodes);
@@ -741,6 +756,72 @@ public:
             for (auto &vn : storageNode->virtualNodes)
                 hashRing.addNode(vn);
         }
+    }
+
+    void syncWithStorageNodes()
+    {
+
+    }
+
+    /**
+     * 
+     */
+    void syncWithStorageNode(uint32_t storageNodeId)
+    {
+        std::shared_ptr<StorageNode> sn = this->storageNodes[storageNodeId];
+
+        auto client = this->getHttpClient(sn);
+
+        http_request request;
+        request.set_method(methods::GET);
+        request.set_request_uri(U("/sync"));
+
+        auto task = client->request(request)
+        .then([=](http_response response)
+        {
+            if (response.status_code() != status_codes::OK)
+            {
+                throw std::runtime_error(
+                    "syncWithStorageNode() failed with status: " + std::to_string(response.status_code())
+                );
+            }
+
+            return response.extract_vector();
+        })
+
+        .then([=](std::vector<unsigned char> payload)
+        {
+            processSyncResponse(payload);
+        });
+
+    }
+
+    void processSyncResponse(std::vector<unsigned char> &payload)
+    {
+        auto it = payload.begin();
+        while (it < payload.end())
+        {
+            // key
+            std::string key;
+
+            // num. blocks
+            uint32_t numBlocks;
+            std::memcpy(&numBlocks, &(*it), sizeof(numBlocks));
+            it += sizeof(numBlocks);
+
+            // block nums
+            std::vector<uint32_t> blockNums;
+            for (int i = 0; i < numBlocks; i++)
+            {
+                uint32_t blockNum;
+                std::memcpy(&blockNum, &(*it), sizeof(blockNum));
+                blockNums.push_back(blockNum);
+                it += sizeof(blockNum);
+            }
+        }
+        
+        assert(it == payload.end());
+
     }
 
     /**
@@ -974,9 +1055,11 @@ public:
 
 void run()
 {    
-    std::string configFilePath = "../src/config.json";
-    MasterServer masterServer = MasterServer(configFilePath);
-    masterServer.startServer();
+    // std::string configFilePath = "../src/config.json";
+    // MasterServer masterServer = MasterServer(configFilePath);
+    // masterServer.startServer();
+
+    PayloadsTests::runAll();
 }
 
 int main() 
@@ -986,10 +1069,11 @@ int main()
 
 /*
 TODO:
-    - fix 'no delete' bug
+    - make SyncResponse mapping of form: key -> BlockNumList object
     - master restarting
-        - i.e. minimal master persistence to rebuild from shutdown / reboot
         - /sync endpoint on storage server that master hits on start for each server
+        - make BATEntry include 'key'
+    - fix 'no delete' bug
     - adding / removing nodes / rebalancing
     - generally fix up .then logic
         - not really async sometimes
@@ -1035,8 +1119,40 @@ potentially:
         - mocking endpoints?
 
 MASTER RESTARTING:
-    - persist current storage nodes
+    - persist:
+        - perhaps just the whole master config?
+            - no
+            - the idea of config.json is for it to specify
+              config for the life of the program
+            - wanna change the config? gonna need a restart.
+                - if change num virtual nodes, or replication factor,
+                  need a re-balance
+            - ip:port's given in config file just supposed to be starters
+              anyway -> as in, can add more dynamically as you go
+            - when add nodes dynamically, shouldn't provide any way 
+              to change config
+                - uses same config as is already initialised by config.json
+        - for each node:
+            - ip:port
+            - num virtual nodes
+            - replication factor
+
     - for each node, query /sync endpoint
     - need:
         - each key and its block numbers
+    - response format:
+        ----
+        key0
+        numBlocks
+        blockNumA
+        blockNumB
+        ...
+        ----
+        key1
+        numBlocks
+        blockNumA
+        blockNumB
+        ...
+        ----
+        ...
 */

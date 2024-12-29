@@ -2,25 +2,23 @@
     "masterServer": {
         "masterServerIPPort": "http://localhost:9000",
         "storageNodeIPs": [
-            "http://127.0.0.1:8081",
-            "http://127.0.0.1:8082",
-            "http://127.0.0.1:8083"
+            "http://127.0.0.1:8080"
         ],
         "healthCheckPeriodMs": 1000,
         "numVirtualNodes": 50,
-        "dataBlockSize": 4096,
-        "replicationFactor": 2
+        "replicationFactor": 1
     },
 
     "storageServer": {
-        "storeDirPath": "/rackkey",
+        "storeDirPath": "rackkey",
         "storeFilePrefix": "store",
         "diskBlockSize": 4096,
         "maxDataSizePower": 30,
-        "removeExistingStoreFile": true
+        "removeExistingStoreFile": false
     },
 
     "shared": {
-        "dataBlockSize": 4096
+        "dataBlockSize": 4096,
+        "keyLengthMax": 50
     }
 }
