@@ -50,6 +50,7 @@ public:
      * Nicknamed the 'KBN' for brevity.
      */
     std::map<std::string, std::shared_ptr<std::map<uint32_t, std::set<uint32_t>>>> keyBlockNodeMap;
+    std::mutex kbnMutex;
 
     /**
      * Stores our storage nodes, which are represented as StorageNode
@@ -105,7 +106,6 @@ public:
             auto start = std::chrono::high_resolution_clock::now();
 
             // check key exists
-            server->showKbn();
             if (server->keyBlockNodeMap.find(key) == server->keyBlockNodeMap.end())
             {
                 std::cout << "GET: failed - key doesn't exist" << std::endl;
@@ -745,22 +745,6 @@ public:
         }
     };
 
-    /**
-     * Initialise our storages nodes and add their virtual nodes 
-     * to the hash ring.
-     */
-    void initialiseStorageNodes() {
-        for (std::string ipPort : this->config.storageNodeIPs) 
-        {
-            auto storageNode = std::make_shared<StorageNode>(ipPort, this->config.numVirtualNodes);
-            this->storageNodes[storageNode->id] = storageNode;
-
-            // add all virtual nodes to the hash ring
-            for (auto &vn : storageNode->virtualNodes)
-                hashRing.addNode(vn);
-        }
-    }
-
     void syncWithStorageNodes()
     {
         std::vector<pplx::task<void>> syncTasks;
@@ -773,8 +757,6 @@ public:
 
         auto task = pplx::when_all(syncTasks.begin(), syncTasks.end());
         task.wait();
-
-        showKbn();
     }
 
     /**
@@ -818,17 +800,43 @@ public:
                 key = StringUtils::fixedSize(key, 50);
 
                 auto blockNodeMap = std::make_shared<std::map<uint32_t, std::set<uint32_t>>>();
-                this->keyBlockNodeMap[key] = blockNodeMap;
 
-                for (auto bn : blockNums)
+                {
+                    std::lock_guard<std::mutex> lock(this->kbnMutex);
+                    if (this->keyBlockNodeMap.find(key) != this->keyBlockNodeMap.end())
+                        blockNodeMap = this->keyBlockNodeMap[key];
+                }
+                
+                for (auto &bn : blockNums)
                 {
                     if (blockNodeMap->find(bn) == blockNodeMap->end())
                         blockNodeMap->insert({bn, std::set<uint32_t>()});
                     blockNodeMap->at(bn).insert(storageNodeId);
                 }
+
+                {
+                    std::lock_guard<std::mutex> lock(this->kbnMutex);
+                    this->keyBlockNodeMap[key] = blockNodeMap;
+                }
             }
         });
         return task;
+    }
+
+    /**
+     * Initialise our storages nodes and add their virtual nodes 
+     * to the hash ring.
+     */
+    void initialiseStorageNodes() {
+        for (std::string ipPort : this->config.storageNodeIPs) 
+        {
+            auto storageNode = std::make_shared<StorageNode>(ipPort, this->config.numVirtualNodes);
+            this->storageNodes[storageNode->id] = storageNode;
+
+            // add all virtual nodes to the hash ring
+            for (auto &vn : storageNode->virtualNodes)
+                hashRing.addNode(vn);
+        }
     }
 
     /**
@@ -1096,18 +1104,18 @@ int main()
 
 /*
 TODO:
+    - fix sync 'diff bug' for sync
     - make sure all manual 'payload creations' are now done with
       the appropriate serialize / deserialize methods
-    - make SyncResponse mapping of form: key -> BlockNumList object
-    - master restarting
-        - /sync endpoint on storage server that master hits on start for each server
     - fix 'no delete' bug
+    - general cleanup after recovery stuff
+    - do up Master and Storage docs
+
     - adding / removing nodes / rebalancing
     - generally fix up .then logic
         - not really async sometimes
         - may have expensive unintended copies when capturing
           by value
-    - do up Master and Storage docs
     - handle hash collisions
         - in BAT AND on hash ring
     - user should receive actual error messages

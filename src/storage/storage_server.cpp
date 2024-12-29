@@ -349,8 +349,8 @@ public:
 
 void run()
 {
-    // std::string configFilePath = "/app/config.json";
-    std::string configFilePath = "../src/config.json";
+    std::string configFilePath = "/app/config.json";
+    // std::string configFilePath = "../src/config.json";
     StorageServer storageServer = StorageServer(configFilePath);
     storageServer.startServer();
     // DiskStorageTests::runAll();
