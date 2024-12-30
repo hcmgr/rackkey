@@ -126,6 +126,11 @@ namespace StringUtils
      * of size `size`.
      */
     std::string fixedSize(std::string str, uint32_t size);
+
+    /**
+     * Returns new copy of `s`, with null characters removed.
+     */
+    std::string removeNullChars(std::string s);
 }
 
 namespace MathUtils

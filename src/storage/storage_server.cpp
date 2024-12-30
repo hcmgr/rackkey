@@ -319,11 +319,12 @@ public:
         std::string endpoint = p.first;
         std::string key = p.second;
 
-        // Network truncates the key's null bytes. Resize to our fixed key size.
+        // network truncates the key's null bytes. Store as fixed size on disk.
         key = StringUtils::fixedSize(key, this->config.keyLengthMax);
 
         if (endpoint == U("/store"))
         {
+            
             if (request.method() == methods::GET)
                 this->getHandler(request, key);
             if (request.method() == methods::PUT)

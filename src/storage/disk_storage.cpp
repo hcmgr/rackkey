@@ -447,6 +447,8 @@ void DiskStorage::deleteBlocks(std::string key)
     // remove bat entry
     this->bat.numEntries--;
     this->bat.table.erase(batEntry);
+
+    std::cout << this->bat.toString() << std::endl;
 }
 
 /**

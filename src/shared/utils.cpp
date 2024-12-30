@@ -109,7 +109,7 @@ namespace PrintUtils {
      */
     std::string formatNumBytes(uint64_t bytes)
     {
-        const char* suffixes[] = {" bytes", "KB", "MB", "GB", "TB", "PB"};
+        const char* suffixes[] = {"bytes", "KB", "MB", "GB", "TB", "PB"};
         int suffixIndex = 0;
         double size = static_cast<double>(bytes);
 
@@ -134,6 +134,15 @@ namespace StringUtils
     std::string fixedSize(std::string s, uint32_t size)
     {
         s.resize(size, '\0');
+        return s;
+    }
+    
+    /**
+     * Returns new copy of `s`, with null characters removed.
+     */
+    std::string removeNullChars(std::string s)
+    {
+        s.erase(std::remove(s.begin(), s.end(), '\0'), s.end());
         return s;
     }
 }

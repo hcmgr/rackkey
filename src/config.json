@@ -16,7 +16,7 @@
         "storeFilePrefix": "store",
         "diskBlockSize": 4096,
         "maxDataSizePower": 30,
-        "removeExistingStoreFile": false
+        "removeExistingStoreFile": true
     },
 
     "shared": {

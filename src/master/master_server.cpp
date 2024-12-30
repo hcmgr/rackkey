@@ -203,8 +203,6 @@ public:
 
             std::cout << "GET: successful" << std::endl;
 
-            // server->syncWithStorageNodes();
-
             // send success response
             http_response response(status_codes::OK);
             response.set_body(payloadBuffer);
@@ -526,7 +524,7 @@ public:
 
             for (auto p : *(blockNodeMap))
             {
-                std::vector<uint32_t> nodeIds;
+                std::set<uint32_t> nodeIds = p.second;
                 for (auto nodeId : nodeIds)
                     allNodeIds.insert(nodeId);
             }
@@ -563,6 +561,8 @@ public:
             
             // remove key's entry from KBN entirely
             server->keyBlockNodeMap.erase(key);
+
+            server->showKbn();
 
             // send success response
             std::cout << "DEL: successful" << std::endl;
@@ -602,12 +602,19 @@ public:
             // update node's stats
             .then([=](std::vector<unsigned char> payload)
             {
+                // update data sizes
                 Payloads::SizeInfo sizeInfo = Payloads::SizeInfo::deserialize(payload);
-
-                uint32_t blocksRemoved = server->keyBlockNodeMap[key]->size();
-                sn->stats.blocksStored -= blocksRemoved;
-
                 server->updateNodeDataSizes(sn, sizeInfo);
+
+                // update num blocks
+                uint32_t blocksRemoved = 0;
+                for (auto &blockNodesPair : *(server->keyBlockNodeMap[key]))
+                {
+                    std::set<uint32_t> &nodeIds = blockNodesPair.second;
+                    if (nodeIds.find(sn->id) != nodeIds.end())
+                        blocksRemoved++;
+                }
+                sn->stats.blocksStored -= blocksRemoved;
             });
 
             return task;
@@ -636,7 +643,13 @@ public:
 
             std::ostringstream oss;
             for (const auto &p : server->keyBlockNodeMap)
-                oss << p.first << "\n";
+            {
+                std::string key = p.first;
+                key = StringUtils::removeNullChars(key);
+                oss << key << "\n";
+            }
+
+            std::cout << "GET: successful" << std::endl;
             
             request.reply(status_codes::OK, oss.str());
         }
@@ -664,6 +677,7 @@ public:
         void getHandler(http_request request)
         {
             std::cout << "GET /stats req received" << std::endl;
+            std::cout << "GET: successful" << std::endl;
 
             std::ostringstream statsDisplay = createStatsDisplay();
             request.reply(status_codes::OK, statsDisplay.str());
@@ -801,8 +815,6 @@ public:
             {
                 std::string key = p.first;
                 std::vector<uint32_t> blockNums = p.second;
-
-                key = StringUtils::fixedSize(key, 50);
 
                 auto blockNodeMap = std::make_shared<std::map<uint32_t, std::set<uint32_t>>>();
 
@@ -1030,8 +1042,7 @@ public:
         std::string endpoint = p.first;
         std::string key = p.second;
 
-        // Network truncates the key's null bytes. Resize to our fixed key size.
-        key = StringUtils::fixedSize(key, this->config.keyLengthMax);
+        key = StringUtils::fixedSize(key, 50);
 
         StoreEndpoint storeEndpoint(this);
         KeysEndpoint keysEndpoint(this);
@@ -1116,11 +1127,12 @@ int main()
 
 /*
 TODO:
-    - fix /stats bug
-    - fix sync 'diff bug' for sync
+    - fix 'no delete' bug
     - make sure all manual 'payload creations' are now done with
       the appropriate serialize / deserialize methods
-    - fix 'no delete' bug
+    - fix large 73MB.csv bug
+        - for some reason, syncing when 73MB.csv file present
+          causes a read error -> diff between in/ and out/
     - general cleanup after recovery stuff
     - do up Master and Storage docs
 
