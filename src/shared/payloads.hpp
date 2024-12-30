@@ -22,43 +22,50 @@ namespace Payloads
             std::vector<uint32_t> blockNums
         );
 
-        std::vector<unsigned char> serialize();
-        static BlockNumList deserialize(std::vector<unsigned char> buffer);
+        void serialize(std::vector<unsigned char> &buffer);
+        static BlockNumList deserialize(std::vector<unsigned char> &buffer);
         bool equals(BlockNumList other);
     };
 
     /**
      * 
      */
-    struct SizeResponse 
+    struct __attribute__((packed)) SizeInfo 
     {
         uint32_t dataUsedSize;
         uint32_t dataTotalSize;
 
-        SizeResponse(
+        SizeInfo(
             uint32_t dataUsedSize, 
             uint32_t dataTotalSize
         );
 
-        std::vector<unsigned char> serialize();
-        static SizeResponse deserialize(std::vector<unsigned char> buffer);
-        bool equals(SizeResponse other);
+        void serialize(std::vector<unsigned char> &buffer);
+        static SizeInfo deserialize(std::vector<unsigned char> &buffer);
+        static SizeInfo deserialize(
+            std::vector<unsigned char>::iterator &it,
+            std::vector<unsigned char>::iterator end
+        );
+        bool equals(SizeInfo other);
+        std::string toString();
     };
 
     /**
      * 
      */
-    struct SyncResponse
+    struct SyncInfo
     {
         std::map<std::string, std::vector<uint32_t>> keyBlockNumMap;
+        SizeInfo sizeInfo;
 
-        SyncResponse(
-            std::map<std::string, std::vector<uint32_t>> keyBlockNumMap
+        SyncInfo(
+            std::map<std::string, std::vector<uint32_t>> keyBlockNumMap,
+            SizeInfo sizeInfo
         );
 
-        std::vector<unsigned char> serialize();
-        static SyncResponse deserialize(std::vector<unsigned char> buffer);
-        bool equals(SyncResponse other);
+        void serialize(std::vector<unsigned char> &buffer);
+        static SyncInfo deserialize(std::vector<unsigned char> &buffer);
+        bool equals(SyncInfo other);
         std::string toString();
     };
 };

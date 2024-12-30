@@ -233,8 +233,10 @@ public:
             keyBlockNumMap[key] = blockNums;
         }
 
-        Payloads::SyncResponse syncResponse(keyBlockNumMap);
-        std::vector<unsigned char> buffer = syncResponse.serialize();
+        Payloads::SizeInfo sizeInfo(this->diskStorage->dataUsedSize(), this->diskStorage->dataTotalSize());
+        Payloads::SyncInfo syncInfo(keyBlockNumMap, sizeInfo);
+        std::vector<unsigned char> buffer;
+        syncInfo.serialize(buffer);
 
         return buffer;
     }
@@ -255,8 +257,9 @@ public:
         uint32_t dataUsedSize = this->diskStorage->dataUsedSize();
         uint32_t dataTotalSize = this->diskStorage->dataTotalSize();
 
-        Payloads::SizeResponse sizeResponse(dataUsedSize, dataTotalSize);
-        std::vector<unsigned char> buffer = sizeResponse.serialize();
+        Payloads::SizeInfo sizeInfo(dataUsedSize, dataTotalSize);
+        std::vector<unsigned char> buffer; 
+        sizeInfo.serialize(buffer);
 
         return buffer;
     }

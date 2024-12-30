@@ -19,19 +19,17 @@ namespace Payloads
     {
     }
 
-    std::vector<unsigned char> BlockNumList::serialize()
+    void BlockNumList::serialize(std::vector<unsigned char> &buffer)
     {
-        std::vector<unsigned char> buffer;
-        for (auto &bn : this->blockNums)
+        for (auto &bn : blockNums)
         {
             auto start = reinterpret_cast<unsigned char*>(&bn);
             auto end = start + sizeof(bn);
-            buffer.insert(buffer.end(), start, end);        }
-
-        return buffer;
+            buffer.insert(buffer.end(), start, end);        
+        }
     }
 
-    BlockNumList BlockNumList::deserialize(std::vector<unsigned char> buffer)
+    BlockNumList BlockNumList::deserialize(std::vector<unsigned char> &buffer)
     {
         std::vector<uint32_t> blockNums;
         auto it = buffer.begin();
@@ -52,7 +50,7 @@ namespace Payloads
 
     bool BlockNumList::equals(BlockNumList other)
     {
-        if (this->blockNums.size() != other.blockNums.size())
+        if (blockNums.size() != other.blockNums.size())
             return false;
         
         for (int i = 0; i < blockNums.size(); i++)
@@ -67,7 +65,7 @@ namespace Payloads
     // SizeResponse methods
     ////////////////////////////////////////////
 
-    SizeResponse::SizeResponse(
+    SizeInfo::SizeInfo(
         uint32_t dataUsedSize,
         uint32_t dataTotalSize
     ) 
@@ -76,10 +74,8 @@ namespace Payloads
     {
     }
 
-    std::vector<unsigned char> SizeResponse::serialize()
+    void SizeInfo::serialize(std::vector<unsigned char> &buffer)
     {
-        std::vector<unsigned char> buffer;
-        
         // data used 
         auto start = reinterpret_cast<unsigned char*>(&dataUsedSize);
         auto end = start + sizeof(dataUsedSize);
@@ -89,16 +85,14 @@ namespace Payloads
         start = reinterpret_cast<unsigned char*>(&dataTotalSize);
         end = start + sizeof(dataTotalSize);
         buffer.insert(buffer.end(), start, end);
-
-        return buffer;
     }
 
-    SizeResponse SizeResponse::deserialize(std::vector<unsigned char> buffer)
+    SizeInfo SizeInfo::deserialize(std::vector<unsigned char> &buffer)
     {
+        auto it = buffer.begin();
+
         uint32_t dataUsedSize;
         uint32_t dataTotalSize;
-
-        auto it = buffer.begin();
 
         std::memcpy(&dataUsedSize, &(*it), sizeof(dataUsedSize));
         it += sizeof(dataUsedSize);
@@ -108,11 +102,31 @@ namespace Payloads
 
         assert(it == buffer.end());
 
-        SizeResponse sr(dataUsedSize, dataTotalSize);
+        SizeInfo sr(dataUsedSize, dataTotalSize);
         return sr;
     }
 
-    bool SizeResponse::equals(SizeResponse other)
+    SizeInfo SizeInfo::deserialize(
+        std::vector<unsigned char>::iterator &it,
+        std::vector<unsigned char>::iterator end
+    )
+    {
+        uint32_t dataUsedSize;
+        uint32_t dataTotalSize;
+
+        std::memcpy(&dataUsedSize, &(*it), sizeof(dataUsedSize));
+        it += sizeof(dataUsedSize);
+
+        std::memcpy(&dataTotalSize, &(*it), sizeof(dataTotalSize));
+        it += sizeof(dataTotalSize);
+
+        assert(it == end);
+
+        SizeInfo sr(dataUsedSize, dataTotalSize);
+        return sr;
+    }
+
+    bool SizeInfo::equals(SizeInfo other)
     {
         return (
             dataUsedSize == other.dataUsedSize && 
@@ -120,21 +134,30 @@ namespace Payloads
         );
     }
 
+    std::string SizeInfo::toString()
+    {
+        std::ostringstream oss;
+        oss << "DataUsedSize: " << dataUsedSize << "\n";
+        oss << "DataTotalSize: " << dataTotalSize << "\n";
+        return oss.str();
+    }
+
     ////////////////////////////////////////////
     // SyncResponse methods
     ////////////////////////////////////////////
 
-    SyncResponse::SyncResponse(
-        std::map<std::string, std::vector<uint32_t>> keyBlockNumMap
+    SyncInfo::SyncInfo(
+        std::map<std::string, std::vector<uint32_t>> keyBlockNumMap,
+        SizeInfo sizeInfo
     )
-        : keyBlockNumMap(keyBlockNumMap)
+        : keyBlockNumMap(keyBlockNumMap),
+          sizeInfo(sizeInfo)
     {
     }
 
-    std::vector<unsigned char> SyncResponse::serialize()
+    void SyncInfo::serialize(std::vector<unsigned char> &buffer)
     {
-        std::vector<unsigned char> buffer;
-
+        // serialize { key -> block nums } map
         for (auto &p : keyBlockNumMap)
         {
             std::string key = p.first;
@@ -159,15 +182,18 @@ namespace Payloads
             }
         }
 
-        return buffer;
+        // serialize size info
+        sizeInfo.serialize(buffer);
     }
 
-    SyncResponse SyncResponse::deserialize(std::vector<unsigned char> buffer)
+    SyncInfo SyncInfo::deserialize(std::vector<unsigned char> &buffer)
     {
         std::map<std::string, std::vector<uint32_t>> keyBlockNumMap;
 
         auto it = buffer.begin();
-        while (it < buffer.end())
+
+        // deserialize { key -> block num } map
+        while (it < (buffer.end() - sizeof(SizeInfo)))
         {
             // key
             std::string key(it, it + 50);
@@ -192,18 +218,23 @@ namespace Payloads
             keyBlockNumMap[key] = std::move(blockNums);
         }
 
+        assert(it == (buffer.end() - sizeof(SizeInfo)));
+
+        // deserialize size info
+        SizeInfo sizeInfo = SizeInfo::SizeInfo::deserialize(it, buffer.end());
         assert(it == buffer.end());
 
-        SyncResponse sr(std::move(keyBlockNumMap));
+        SyncInfo sr(std::move(keyBlockNumMap), std::move(sizeInfo));
         return sr;
     }
 
-    bool SyncResponse::equals(SyncResponse other)
+    bool SyncInfo::equals(SyncInfo other)
     {
-        if (this->keyBlockNumMap.size() != other.keyBlockNumMap.size())
+        if (keyBlockNumMap.size() != other.keyBlockNumMap.size())
             return false;
         
-        for (auto &p : this->keyBlockNumMap)
+        // { key -> block nums } map
+        for (auto &p : keyBlockNumMap)
         {
             std::string key = p.first;
             std::vector<uint32_t> blockNums = p.second;
@@ -218,13 +249,19 @@ namespace Payloads
                     return false;
             }
         }
+
+        // size info 
+        if (!sizeInfo.equals(other.sizeInfo))
+            return false;
+
         return true;
     }
 
-    std::string SyncResponse::toString()
+    std::string SyncInfo::toString()
     {
         std::ostringstream oss;
         
+        // { key -> block nums } map
         for (auto &p : keyBlockNumMap)
         {
             const std::string& key = p.first;
@@ -233,6 +270,9 @@ namespace Payloads
             oss << "Key: " << key << " -> Blocks: ";
             oss << PrintUtils::printVector(blockNums);
         }
+
+        // size info
+        oss << sizeInfo.toString() << "\n";
         
         return oss.str();
     }
@@ -244,17 +284,24 @@ namespace PayloadsTests
     {
         std::vector<uint32_t> blockNums = {1, 2, 3, 4, 5};
         Payloads::BlockNumList original(blockNums);
-        std::vector<unsigned char> serializedData = original.serialize();
-        Payloads::BlockNumList deserialized = Payloads::BlockNumList::deserialize(serializedData);
+
+        std::vector<unsigned char> buffer;
+        original.serialize(buffer);
+
+        Payloads::BlockNumList deserialized = Payloads::BlockNumList::deserialize(buffer);
 
         ASSERT_THAT(original.equals(deserialized));
     }
 
     void testSizeResponse()
     {
-        Payloads::SizeResponse original(100, 500);
-        std::vector<unsigned char> serializedData = original.serialize();
-        Payloads::SizeResponse deserialized = Payloads::SizeResponse::deserialize(serializedData);
+        Payloads::SizeInfo original(100, 500);
+
+        std::vector<unsigned char> buffer;
+        original.serialize(buffer);
+
+        auto it = buffer.begin();
+        Payloads::SizeInfo deserialized = Payloads::SizeInfo::deserialize(it, buffer.end());
 
         ASSERT_THAT(original.equals(deserialized));
     }
@@ -264,10 +311,14 @@ namespace PayloadsTests
         std::map<std::string, std::vector<uint32_t>> keyBlockNumMap;
         keyBlockNumMap[StringUtils::fixedSize("file1", 50)] = {1, 2, 3};
         keyBlockNumMap[StringUtils::fixedSize("file2", 50)] = {4, 5, 6};
+        Payloads::SizeInfo sizeInfo(10, 10);
 
-        Payloads::SyncResponse original(keyBlockNumMap);
-        std::vector<unsigned char> serializedData = original.serialize();
-        Payloads::SyncResponse deserialized = Payloads::SyncResponse::deserialize(serializedData);
+        Payloads::SyncInfo original(keyBlockNumMap, sizeInfo);
+
+        std::vector<unsigned char> buffer;
+        original.serialize(buffer);
+
+        Payloads::SyncInfo deserialized = Payloads::SyncInfo::deserialize(buffer);
 
         ASSERT_THAT(original.equals(deserialized));
     }

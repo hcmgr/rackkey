@@ -468,6 +468,8 @@ public:
                 // update node's stats
                 .then([=](std::vector<unsigned char> payload)
                 {
+                    Payloads::SizeInfo sizeInfo = Payloads::SizeInfo::deserialize(payload);
+
                     // if removing existing blocks, subtract their stats contribution
                     if (server->keyBlockNodeMap.find(key) != server->keyBlockNodeMap.end())
                     {
@@ -484,7 +486,7 @@ public:
                     uint32_t blocksAdded = blocks.size();
                     sn->stats.blocksStored += blocksAdded;
 
-                    server->updateNodeDataSizes(sn, payload);
+                    server->updateNodeDataSizes(sn, sizeInfo);
                 });
 
             return task;
@@ -600,10 +602,12 @@ public:
             // update node's stats
             .then([=](std::vector<unsigned char> payload)
             {
+                Payloads::SizeInfo sizeInfo = Payloads::SizeInfo::deserialize(payload);
+
                 uint32_t blocksRemoved = server->keyBlockNodeMap[key]->size();
                 sn->stats.blocksStored -= blocksRemoved;
 
-                server->updateNodeDataSizes(sn, payload);
+                server->updateNodeDataSizes(sn, sizeInfo);
             });
 
             return task;
@@ -787,12 +791,13 @@ public:
 
         .then([=](std::vector<unsigned char> payload)
         {
-            Payloads::SyncResponse syncResponse = Payloads::SyncResponse::deserialize(payload);
+            Payloads::SyncInfo syncInfo = Payloads::SyncInfo::deserialize(payload);
 
             /**
              * Assign each key's block numbers to node `storageNodeId`
              */
-            for (auto &p : syncResponse.keyBlockNumMap)
+            uint32_t blocksStored = 0;
+            for (auto &p : syncInfo.keyBlockNumMap)
             {
                 std::string key = p.first;
                 std::vector<uint32_t> blockNums = p.second;
@@ -812,6 +817,8 @@ public:
                     if (blockNodeMap->find(bn) == blockNodeMap->end())
                         blockNodeMap->insert({bn, std::set<uint32_t>()});
                     blockNodeMap->at(bn).insert(storageNodeId);
+
+                    blocksStored++;
                 }
 
                 {
@@ -819,6 +826,11 @@ public:
                     this->keyBlockNodeMap[key] = blockNodeMap;
                 }
             }
+
+            // update stats
+            sn->stats.blocksStored = blocksStored;
+            this->updateNodeDataSizes(sn, syncInfo.sizeInfo);
+
         });
         return task;
     }
@@ -992,7 +1004,7 @@ public:
 
     /**
      * Updates the given storage node's data size statistics
-     * from the given `sizeResponseBuffer`.
+     * from the given `sizeInfoBuffer`.
      * 
      * NOTE:
      * 
@@ -1002,14 +1014,12 @@ public:
      */
     void updateNodeDataSizes(
         std::shared_ptr<StorageNode> sn,
-        std::vector<unsigned char> &sizeResponseBuffer)
+        Payloads::SizeInfo sizeInfo
+    )
     {
-        Payloads::SizeResponse sizeResponse = Payloads::SizeResponse::deserialize(sizeResponseBuffer);
-
-        sn->stats.dataBytesUsed = sizeResponse.dataUsedSize;
-        sn->stats.dataBytesTotal = sizeResponse.dataTotalSize;
-        sn->stats.dataBytesFree = sizeResponse.dataTotalSize - sizeResponse.dataUsedSize;
-        return;
+        sn->stats.dataBytesUsed = sizeInfo.dataUsedSize;
+        sn->stats.dataBytesTotal = sizeInfo.dataTotalSize;
+        sn->stats.dataBytesFree = sizeInfo.dataTotalSize - sizeInfo.dataUsedSize;
     }
 
     /**
@@ -1036,12 +1046,12 @@ public:
             if (request.method() == methods::DEL)
                 storeEndpoint.deleteHandler(request, key);
         }
-        else if (endpoint == U("/keys") && key == U(""))
+        else if (endpoint == U("/keys"))
         {
             if (request.method() == methods::GET)
                 keysEndpoint.getHandler(request);
         }
-        else if (endpoint == U("/stats") && key == U(""))
+        else if (endpoint == U("/stats"))
         {
             if (request.method() == methods::GET)
                 statsEndpoint.getHandler(request);
@@ -1095,6 +1105,8 @@ void run()
     std::string configFilePath = "../src/config.json";
     MasterServer masterServer = MasterServer(configFilePath);
     masterServer.startServer();
+
+    PayloadsTests::runAll();
 }
 
 int main() 
@@ -1104,6 +1116,7 @@ int main()
 
 /*
 TODO:
+    - fix /stats bug
     - fix sync 'diff bug' for sync
     - make sure all manual 'payload creations' are now done with
       the appropriate serialize / deserialize methods
