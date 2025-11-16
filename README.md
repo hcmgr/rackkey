@@ -1,6 +1,8 @@
 # rackkey
 A distributed key value store for arbitrary data types, including files, blobs, objects and in-memory data structures.
 
+![arch](assets/arch_dark.png)
+
 ## Key features
 - Distributed storage: 
     - Files are divided into blocks and distributed across a cluster of storage nodes.
@@ -13,10 +15,11 @@ A distributed key value store for arbitrary data types, including files, blobs, 
 - Monitoring: 
     - Node statistics and health checks makes it easy to monitor the  state of the storage cluster.
 
-## Overview
-![arch](assets/arch_dark.png)
-
-![flow_put](assets/flow_put.png)
+<!-- ## Architecture
+**PUT flow**
+![put_flow](assets/put_flow.png)
+<br><br>
+**GET flow** -->
 
 ## Client API
 ### `/store/{KEY}`
