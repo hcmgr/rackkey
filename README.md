@@ -15,21 +15,21 @@ A distributed key value store for arbitrary data types, including files, blobs, 
 
 ## Architecture
 ![arch](docs/arch_dark.png)
-<br><br>
-**PUT flow**
-<br><br>
+#### PUT flow
 ![put_flow](docs/put_flow.png)
+#### GET flow
+![get_flow](docs/get_flow.png)
 
 ## Client API
-### `/store/{KEY}`
+#### `/store/{KEY}`
 - GET/PUT/DELETE
     - read/write/delete data for given `KEY`
 
-### `/keys`
+#### `/keys`
 - GET
     - retreive all keys stored by the storage cluster
 
-### `/stats`
+#### `/stats`
 - GET
     - retreive stats on the storage cluster usage
 
@@ -41,7 +41,7 @@ curl -X GET localhost:9000/store/images.zip -o out/images.zip
 
 ## Install
 
-### Master
+#### Master
 ```bash
 sudo apt update
 sudo apt-get install g++ cmake ## build
@@ -50,7 +50,7 @@ sudo apt-get install libssl-dev libccprest-dev ## core libraries used
 sudo apt-get install unzip ## testing purposes
 ```
 
-### Storage
+#### Storage
 ```bash
 sudo apt update
 sudo apt-get install g++ cmake ## build
@@ -71,7 +71,7 @@ docker-compose --version
 ```
 
 ## Run
-### Master
+#### Master
 ```bash
 mkdir build
 cd build
@@ -80,7 +80,7 @@ make
 ./master
 ```
 
-### Storage
+#### Storage
 ```bash
 mkdir ~/.rackkey
 cd src/storage/docker
