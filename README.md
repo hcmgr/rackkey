@@ -17,6 +17,7 @@ A distributed key value store for arbitrary data types, including files, blobs, 
 ![arch](assets/arch_dark.png)
 <br><br>
 **PUT flow**
+<br><br>
 ![put_flow](assets/put_flow.png)
 
 ## Client API
