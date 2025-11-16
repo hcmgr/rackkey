@@ -353,11 +353,11 @@ public:
 
 void run()
 {
-    std::string configFilePath = "/app/config.json";
+    // std::string configFilePath = "/app/config.json";
     // std::string configFilePath = "../src/config.json";
-    StorageServer storageServer = StorageServer(configFilePath);
-    storageServer.startServer();
-    // DiskStorageTests::runAll();
+    // StorageServer storageServer = StorageServer(configFilePath);
+    // storageServer.startServer();
+    DiskStorageTests::runAll();
 }
 
 int main()

@@ -1,8 +1,9 @@
-# rackkey
-
 A distributed key value store for arbitrary data types, including files, blobs, objects and in-memory data structures.
 
-### Key features
+## Overview
+![arch](assets/arch_dark.png)
+
+## Key features
 - Distributed storage: 
     - Files are divided into blocks and distributed across a cluster of storage nodes.
 - Horizontal scalability: 
@@ -14,25 +15,28 @@ A distributed key value store for arbitrary data types, including files, blobs, 
 - Monitoring: 
     - Node statistics and health checks makes it easy to monitor the  state of the storage cluster.
 
-### API
-##### `/store/{KEY}`
+## API
+### `/store/{KEY}`
 - GET/PUT/DELETE
     - read/write/delete data for given `KEY`
 
-##### `/keys`
+### `/keys`
 - GET
     - retreive all keys stored by the storage cluster
 
-##### `/stats`
+### `/stats`
 - GET
     - retreive stats on the storage cluster usage
 
-### Configurability
-Both master and storage node functionality is configurable using `src/config.json` (see src/ for detailed instructions on how to use `config.json`)
+## Example usage
+```bash
+curl -X PUT localhost:9000/store/images.zip --data-binary @in/images.zip
+curl -X GET localhost:9000/store/images.zip -o out/images.zip
+```
 
-### Install
+## Install
 
-##### Master
+### Master
 ```bash
 sudo apt update
 sudo apt-get install g++ cmake ## build
@@ -41,7 +45,7 @@ sudo apt-get install libssl-dev libccprest-dev ## core libraries used
 sudo apt-get install unzip ## testing purposes
 ```
 
-##### Storage
+### Storage
 ```bash
 sudo apt update
 sudo apt-get install g++ cmake ## build
@@ -61,8 +65,8 @@ sudo chmod +x /usr/local/bin/docker-compose
 docker-compose --version
 ```
 
-### Run
-##### Master
+## Run
+### Master
 ```bash
 mkdir build
 cd build
@@ -71,15 +75,12 @@ make
 ./master
 ```
 
-##### Storage
+### Storage
 ```bash
 mkdir ~/.rackkey
 cd src/storage/docker
 ./scripts/deploy.sh
 ```
 
-### Usage
-```bash
-curl -X PUT localhost:9000/store/images.zip --data-binary @in/images.zip
-curl -X GET localhost:9000/store/images.zip -o out/images.zip
-```
+## Configurability
+Both master and storage node functionality is configurable using `src/config.json`. See src/ for detailed instructions.

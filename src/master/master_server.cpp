@@ -763,6 +763,9 @@ public:
         }
     };
 
+    /**
+     * 
+     */
     void syncWithStorageNodes()
     {
         std::vector<pplx::task<void>> syncTasks;
@@ -1113,9 +1116,9 @@ public:
 
 void run()
 {    
-    std::string configFilePath = "../src/config.json";
-    MasterServer masterServer = MasterServer(configFilePath);
-    masterServer.startServer();
+    // std::string configFilePath = "../src/config.json";
+    // MasterServer masterServer = MasterServer(configFilePath);
+    // masterServer.startServer();
 
     PayloadsTests::runAll();
 }
@@ -1127,7 +1130,6 @@ int main()
 
 /*
 TODO:
-    - fix 'no delete' bug
     - make sure all manual 'payload creations' are now done with
       the appropriate serialize / deserialize methods
     - fix large 73MB.csv bug
@@ -1135,6 +1137,7 @@ TODO:
           causes a read error -> diff between in/ and out/
     - general cleanup after recovery stuff
     - do up Master and Storage docs
+    - implement concurrent r/w protections for DiskStorage
 
     - adding / removing nodes / rebalancing
     - generally fix up .then logic
@@ -1153,9 +1156,6 @@ TODO:
             - pretty sure this isn't the case, but want  to make sure
     - indexation for store file (currently O(N) searching through all BAT entries)
     - understand and internalise CAP and how it applies here
-    - implement concurrent r/w protections for DiskStorage
-        - see bottom of server.cpp for plan
-    - make .then() code non-blocking (related to concurrent r/w)
 
 bugs:
     - master sometimes segfaults weirdly

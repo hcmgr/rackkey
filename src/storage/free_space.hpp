@@ -108,3 +108,19 @@ namespace FreeSpaceMapTests
     void testAllocateThenFree();
     void runAll();
 };
+
+/*
+- how to separate .hpp and .cpp
+- common std lib functions
+    - std::vector<>
+    - std::map
+    - iterating over maps (so, std::pair<> as well)
+    - std::string
+- more difficult parts of classes
+    - inheritance
+    - virtual functions
+    - constructors and destructors
+- how to build a project
+    - i.e. use cmake (DO NOT USE MAKEFILES)
+- smart pointers
+*/
