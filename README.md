@@ -1,3 +1,4 @@
+# rackkey
 A distributed key value store for arbitrary data types, including files, blobs, objects and in-memory data structures.
 
 ## Overview
@@ -15,7 +16,7 @@ A distributed key value store for arbitrary data types, including files, blobs, 
 - Monitoring: 
     - Node statistics and health checks makes it easy to monitor the  state of the storage cluster.
 
-## API
+## Client API
 ### `/store/{KEY}`
 - GET/PUT/DELETE
     - read/write/delete data for given `KEY`
