@@ -14,7 +14,10 @@ A distributed key value store for arbitrary data types, including files, blobs, 
     - Node statistics and health checks makes it easy to monitor the  state of the storage cluster.
 
 ## Architecture
-![put_flow](assets/arch_dark.png)
+![arch](assets/arch_dark.png)
+<br><br>
+**PUT flow**
+![put_flow](assets/put_flow.png)
 
 ## Client API
 ### `/store/{KEY}`
